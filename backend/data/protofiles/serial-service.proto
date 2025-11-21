@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package hal.serial;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "./protos;protos";
+
+// Typy wyliczeniowe
+enum SerialMode {
+  RS485 = 0;
+  RS422 = 1;
+}
+
+enum SlewRateMode {
+  HIGH_SPEED = 0;
+  SLOW_SPEED = 1;
+}
+
+// Komunikaty żądań i odpowiedzi
+message InterfaceNameRequest {
+  string interfaceName = 1;
+}
+
+message SetModeRequest {
+  string interfaceName = 1;
+  SerialMode mode = 2;
+}
+
+message GetModeResponse {
+  SerialMode mode = 1;
+}
+
+message SetSlewRateRequest {
+  string interfaceName = 1;
+  SlewRateMode slewRate = 2;
+}
+
+message GetSlewRateResponse {
+  SlewRateMode slewRate = 1;
+}
+
+message SetTerminationRequest {
+  string interfaceName = 1;
+  bool enableTermination = 2;
+}
+
+message GetTerminationResponse {
+  bool terminationEnabled = 1;
+}
+
+message SetTransceiverPowerRequest {
+  string interfaceName = 1;
+  bool powerOn = 2;
+}
+
+message GetTransceiverPowerResponse {
+  bool powerOn = 1;
+}
+
+message GetStatisticsResponse {
+  uint64 txCount = 1;
+  uint64 rxCount = 2;
+}
+
+message GetAvailableModesResponse {
+  repeated SerialMode modes = 1;
+}
+
+message GetAvailableSlewRatesResponse {
+  repeated SlewRateMode slewRates = 1;
+}
+
+message GetBaudRateResponse {
+  uint32 baudRate = 1;
+}
+
+message ListInterfacesRequest {
+  bool includeDetails = 1;
+}
+
+message InterfaceInfo {
+  string name = 1;
+  SerialMode currentMode = 2;
+  bool terminationEnabled = 3;
+  uint32 baudRate = 4;
+  SlewRateMode slewRate = 5;
+  bool transceiverPower = 6;
+}
+
+message ListInterfacesResponse {
+  repeated InterfaceInfo interfaces = 1;
+}
+
+// Definicja usługi
+service Serial {
+  // Podstawowe operacje konfiguracyjne
+  rpc SetMode(SetModeRequest) returns (google.protobuf.Empty);
+  rpc GetMode(InterfaceNameRequest) returns (GetModeResponse);
+  rpc SetSlewRate(SetSlewRateRequest) returns (google.protobuf.Empty);
+  rpc GetSlewRate(InterfaceNameRequest) returns (GetSlewRateResponse);
+  rpc SetTermination(SetTerminationRequest) returns (google.protobuf.Empty);
+  rpc GetTermination(InterfaceNameRequest) returns (GetTerminationResponse);
+  rpc SetTransceiverPower(SetTransceiverPowerRequest) returns (google.protobuf.Empty);
+  rpc GetTransceiverPower(InterfaceNameRequest) returns (GetTransceiverPowerResponse);
+
+  // Monitorowanie i statystyki
+  rpc GetStatistics(InterfaceNameRequest) returns (GetStatisticsResponse);
+  rpc GetBaudRate(InterfaceNameRequest) returns (GetBaudRateResponse);
+
+  // Informacje o dostępnych opcjach
+  rpc GetAvailableModes(google.protobuf.Empty) returns (GetAvailableModesResponse);
+  rpc GetAvailableSlewRates(google.protobuf.Empty) returns (GetAvailableSlewRatesResponse);
+  rpc ListInterfaces(ListInterfacesRequest) returns (ListInterfacesResponse);
+}

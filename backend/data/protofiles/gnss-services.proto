@@ -1,0 +1,103 @@
+/**
+ * GNSS Service.
+ *
+ * Service for reading GNSS data
+ */
+ syntax = "proto3";
+
+ package hal.gnss;
+ 
+ import "google/protobuf/empty.proto";
+ 
+ option go_package = "./protos;protos";
+
+enum NMEAFrequency {
+    _1Hz = 0;
+    _2Hz = 1;
+    _5Hz = 2;
+    _10Hz = 3;
+}
+
+message NMEAFrequenciesList {
+    repeated string frequencies = 1;
+}
+
+message NMEAFrequencySettings {
+    NMEAFrequency frequency = 1;
+}
+
+message GnssDataJson {
+    double latitude = 1;     // The latitude of the GNSS position in decimal degrees.
+    double longitude = 2;    // The longitude of the GNSS position in decimal degrees.
+    double altitude = 3;     // The altitude of the GNSS position in meters.
+    string timestamp = 4;    // The timestamp of the GNSS record in ISO 8601 format.
+    double speed_kph = 5;    // The speed of the object in kilometers per hour.
+    double speed_mph = 6;    // The speed of the object in miles per hour.
+    double course = 7;       // The direction of travel in degrees, where 0 is north.
+    double satellites = 8;   // The number of satellites used to determine the position.
+    double fix_type = 9;     // Indicates the type of GNSS fix (e.g., 1 for no fix, 2 for 2D fix, 3 for 3D fix).
+    double fix_quality = 10;  // Indicates the GNSS fix quality (e.g., 0 for invalid, 1 for GPS fix, 2 for DGPS fix).
+    double hdop = 11;        // The Horizontal Dilution of Precision, a measure of the GNSS signal's accuracy.
+}
+
+message GnssData{
+    string sentence = 1;
+}
+
+message DeviceManagementRequest {
+    bool enableReciever = 1;
+    bool enableAntenna = 2;
+}
+
+message DeviceManagementResponse {
+    bool enableReciever = 1;
+    bool enableAntenna = 2;
+    bool sessionActive = 3;
+    bool rebootRequired = 4;
+}
+
+message GnssConstellationsSettings {
+    bool GLONASS = 1;
+    bool BDS = 2;
+    bool Galileo = 3;
+}
+
+message GnssConstellations {
+    repeated string constellations = 1;
+}
+
+
+ /**
+  * Service exposing GNSS functions.
+  */
+  service Gnss {
+    // Provides parsed Gnss data as JSON
+    rpc StreamDataJson(google.protobuf.Empty) returns (stream GnssDataJson) {}
+  
+    // Provides raw stream that is returned by the Gnss receiver
+    rpc StreamDataRaw(google.protobuf.Empty) returns (stream GnssData) {}
+
+    // Provides a way do get receiver and antenna status
+    rpc GetDeviceStatus(google.protobuf.Empty) returns (DeviceManagementResponse) {}
+  
+    // Provides a way do disable/enable receiver and antenna
+    rpc SetDeviceStatus(DeviceManagementRequest) returns (google.protobuf.Empty) {}
+  
+    // Provides a way to set preferred constellations
+    rpc SetConstellations(GnssConstellationsSettings) returns (google.protobuf.Empty) {}
+  
+    // Provides a way to get current preferred constellations
+    rpc GetConstellations(google.protobuf.Empty) returns (GnssConstellationsSettings) {}
+  
+    // Provides a way to get a list of available constellations
+    rpc ListAvailableConstellations(google.protobuf.Empty) returns (GnssConstellations) {}
+  
+    // Provides a way to set NMEA output frequency
+    rpc SetNmeaOutputFrequency(NMEAFrequencySettings) returns (google.protobuf.Empty) {}
+  
+    // Provides a way to set NMEA output frequency
+    rpc GetNmeaOutputFrequency(google.protobuf.Empty) returns (NMEAFrequencySettings) {}
+  
+    // Provides a way to get a list of available NMEA output frequencies
+    rpc ListNmeaOutputFrequencies(google.protobuf.Empty) returns (NMEAFrequenciesList) {}
+  }

@@ -1,0 +1,18 @@
+{
+    "tdc": {
+    "deviceConfig": {
+      "ipAddress": "192.168.0.100",
+      "login": "admin",
+      "password": "Welcome1!"
+    },
+    "waitForBoth": true,
+    "cycleTimeout": 5000,
+    "sendIncompleteData": true
+  },
+  "lectory":{
+    "lewy": "192.168.0.2", 
+    "prawy": "192.168.0.3",
+    "przód": "192.168.0.1",
+    "tył": "192.168.0.4"
+  }
+}

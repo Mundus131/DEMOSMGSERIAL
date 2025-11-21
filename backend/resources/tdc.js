@@ -1,0 +1,567 @@
+const EventEmitter = require('events');
+const configWatcher = require('./configWatcher');
+const { logState, logDataFrame } = require('./logger');
+const config  = require('../data/configuration/configuration.json');
+const { digitalIOManager } = require('./digitalio');
+const { decodeControlSequences } = require('./utils');
+const MultiLectorController = require('./multiLector');
+const rsSender = require('./rsSender');
+const fs = require('fs');
+const path = require('path');
+console.log(config.lectory)
+const lectorController = new MultiLectorController(config.lectory, 2112);
+
+function checkScenario(data) {
+  const { przód, tył, lewy, prawy } = data;
+
+  // Scenariusz 1: lewy/prawy po 2 elementy, przód/tył = NoRead
+  if (lewy.length === 2 && prawy.length === 2 &&
+      przód[0] === 'NoRead' && tył[0] === 'NoRead') {
+    return true;
+  }
+
+  // Scenariusz 2: lewy/prawy po 2 elementy, przód/tył po jednym obiekcie
+  if (lewy.length === 2 && prawy.length === 2 &&
+      przód.length === 1 && przód[0] !== 'NoRead' &&
+      tył.length === 1 && tył[0] !== 'NoRead') {
+    return true;
+  }
+
+  return false;
+}
+
+// Funkcja pomocnicza do ekstrakcji kodów z wyników
+function extractCodesFromResults(results) {
+  const codes = [];
+  
+  for (const [lectorName, lectorCodes] of Object.entries(results)) {
+    if (Array.isArray(lectorCodes)) {
+      for (const code of lectorCodes) {
+        if (code && code !== 'NoRead' && code !== 'NORREAD') {
+          codes.push(code);
+        }
+      }
+    }
+  }
+  
+  console.log(`[TDC] Wyekstrahowano kody do wysłania: ${codes}`);
+  return codes;
+}
+
+// Zapis wyniku wysyłki RS
+async function saveRSSendResult(sendResult, originalResults) {
+  const resultData = {
+    timestamp: new Date().toISOString(),
+    originalResults: originalResults,
+    rsSendResult: sendResult,
+    success: sendResult.failed === 0
+  };
+  
+  try {
+    const resultsFile = path.join(__dirname, 'rs_send_results.json');
+    let allResults = [];
+    
+    if (fs.existsSync(resultsFile)) {
+      const existingData = fs.readFileSync(resultsFile, 'utf8');
+      allResults = JSON.parse(existingData);
+    }
+    
+    allResults.push(resultData);
+    fs.writeFileSync(resultsFile, JSON.stringify(allResults, null, 2));
+    
+    console.log('[TDC] Zapisano wynik wysyłki RS do pliku');
+  } catch (error) {
+    console.error('[TDC] Błąd zapisu wyniku wysyłki RS:', error);
+  }
+}
+
+lectorController.startAll();
+const resultsFile = path.join(__dirname, 'results.json');
+
+// event po zakończeniu cyklu
+lectorController.on('cycleCompleted', async ({ success, results }) => {
+  console.log('===> Wyniki cyklu:', success, results);
+  var state = checkScenario(results)
+  console.log("Stan działania: "+state)
+  digitalIOManager.setDirection("DIO_A","OUT")
+  digitalIOManager.setDirection("DIO_B","OUT")
+  
+  if(state == true){
+    digitalIOManager.write("DIO_A","HIGH")
+    digitalIOManager.write("DIO_B","LOW")
+    
+    // DODANE: Wysyłanie kodów przez RS po pomyślnym scenariuszu
+    try {
+      const codesToSend = extractCodesFromResults(results);
+      if (codesToSend.length > 0) {
+        console.log(`[TDC] Rozpoczynanie wysyłki ${codesToSend.length} kodów przez RS`);
+        const sendResult = await rsSender.sendCodes(codesToSend);
+        console.log('[TDC] Wynik wysyłki RS:', sendResult);
+        
+        // Zapis wyniku wysyłki
+        await saveRSSendResult(sendResult, results);
+      } else {
+        console.log('[TDC] Brak kodów do wysłania przez RS');
+      }
+    } catch (error) {
+      console.error('[TDC] Błąd wysyłki RS:', error);
+      await logState(`[TDC] Błąd wysyłki RS: ${error.message}`);
+    }
+    
+  } else {
+    digitalIOManager.write("DIO_A","LOW")
+    digitalIOManager.write("DIO_B","HIGH")
+  }
+});
+
+class TDCController extends EventEmitter {
+  constructor() {
+    super();
+    this.currentCycle = null;
+    this.defaultConfig = {
+      sendIncompleteData: true,
+      cycleTimeout: 5000,
+      maxRetries: 3,
+      waitForBoth: false,
+      outputStringFormat: {
+        start: "<STX>",
+        stop: "<ETX>",
+        separator: ","
+      }
+    };
+    this.config = { ...this.defaultConfig };
+    this.cleanupConfigWatcher = null;
+    this.digitalMonitoringActive = false;
+    this.previousDigitalStates = {};
+    this.monitoringInterval = null;
+  }
+
+  async initialize() {
+    await this.updateConfig(configWatcher.lastConfig?.tdc);
+    this.watchConfigurationChanges();
+    await logState('[TDC] Inicjalizacja kontrolera TDC');
+    this.resetCycle();
+    await this.startDigitalMonitoring();
+  }
+
+  async startDigitalMonitoring() {
+    if (this.digitalMonitoringActive) {
+      await this.stopDigitalMonitoring();
+    }
+
+    this.digitalMonitoringActive = true;
+    const pinName = 'DI_A';
+    const checkIntervalMs = 50;
+    digitalIOManager.setDirection('DIO_A',"OUT")
+    await logState(`[TDC] Rozpoczynam monitorowanie ${pinName} co ${checkIntervalMs}ms`);
+
+    try {
+      // Inicjalizacja stanu
+      const initialState = await digitalIOManager.read(pinName);
+      this.previousDigitalStates[pinName] = initialState;
+      await logState(`[TDC] Stan początkowy ${pinName}: ${initialState}`);
+    } catch (error) {
+      await logState(`[TDC] Błąd odczytu stanu początkowego ${pinName}: ${error.message}`);
+      this.previousDigitalStates[pinName] = 'LOW'; // Domyślny stan
+    }
+
+    const monitorLoop = async () => {
+      if (!this.digitalMonitoringActive) return;
+
+      try {
+        const currentState = await digitalIOManager.read(pinName);
+        const previousState = this.previousDigitalStates[pinName];
+
+        // Detekcja zbocza narastającego (LOW -> HIGH)
+        if (previousState === 'LOW' && currentState === 'HIGH') {
+          await logState(`[TDC] Zbocze narastające na ${pinName} - wyzwalanie cyklu`);
+          await this.startCycle(`digital-read:${pinName}`);
+        }
+
+        this.previousDigitalStates[pinName] = currentState;
+      } catch (error) {
+        await logState(`[TDC] Błąd monitorowania ${pinName}: ${error.message}`);
+      }
+
+      // Kontynuacja monitorowania
+      if (this.digitalMonitoringActive) {
+        this.monitoringInterval = setTimeout(monitorLoop, checkIntervalMs);
+      }
+    };
+
+    // Uruchomienie pętli monitorowania
+    this.monitoringInterval = setTimeout(monitorLoop, checkIntervalMs);
+  }
+
+  async stopDigitalMonitoring() {
+    this.digitalMonitoringActive = false;
+    if (this.monitoringInterval) {
+      clearTimeout(this.monitoringInterval);
+      this.monitoringInterval = null;
+    }
+    await logState('[TDC] Zatrzymano monitorowanie digital IO');
+  }
+
+  async updateConfig(newConfig) {
+    if (!newConfig) return;
+
+    console.log('[TDC DEBUG] Otrzymana konfiguracja TDC:', JSON.stringify(newConfig, null, 2));
+    console.log('[TDC DEBUG] Pełna konfiguracja systemu:', JSON.stringify(configWatcher.lastConfig, null, 2));
+
+    const oldConfig = JSON.parse(JSON.stringify(this.config));
+    const changes = [];
+
+    // Pobierz outputStringFormat z sekcji tdc lub z głównego poziomu
+    const outputFormatConfig = newConfig.outputStringFormat 
+        || (configWatcher.lastConfig && configWatcher.lastConfig.outputStringFormat);
+
+    // Aktualizacja podstawowych parametrów
+    ['cycleTimeout', 'maxRetries', 'waitForBoth', 'sendIncompleteData'].forEach(key => {
+        if (newConfig[key] !== undefined && newConfig[key] !== this.config[key]) {
+            changes.push(`${key}: ${this.config[key]} → ${newConfig[key]}`);
+            this.config[key] = newConfig[key];
+        }
+    });
+
+    // Aktualizacja formatu wyjściowego
+    if (outputFormatConfig) {
+        const newFormat = {
+            start: outputFormatConfig.start !== undefined 
+                ? outputFormatConfig.start 
+                : this.config.outputStringFormat.start,
+            stop: outputFormatConfig.stop !== undefined 
+                ? outputFormatConfig.stop 
+                : this.config.outputStringFormat.stop,
+            separator: outputFormatConfig.separator !== undefined 
+                ? outputFormatConfig.separator 
+                : this.config.outputStringFormat.separator
+        };
+
+        // Sprawdź i zarejestruj zmiany
+        if (newFormat.start !== oldConfig.outputStringFormat.start) {
+            changes.push(`start: ${oldConfig.outputStringFormat.start} → ${newFormat.start}`);
+        }
+        if (newFormat.stop !== oldConfig.outputStringFormat.stop) {
+            changes.push(`stop: ${oldConfig.outputStringFormat.stop} → ${newFormat.stop}`);
+        }
+        if (newFormat.separator !== oldConfig.outputStringFormat.separator) {
+            changes.push(`separator: ${oldConfig.outputStringFormat.separator} → ${newFormat.separator}`);
+        }
+
+        // Nadpisz cały obiekt
+        this.config.outputStringFormat = newFormat;
+    }
+
+    console.log('[TDC DEBUG] Konfiguracja po zmianach:', JSON.stringify(this.config, null, 2));
+
+    if (changes.length > 0) {
+        await logState(`[TDC] Zmiana konfiguracji: ${changes.join(', ')}`);
+        
+        if (changes.some(c => c.includes('separator'))) {
+            console.log('[TDC DEBUG] Potwierdzona zmiana separatora:', this.config.outputStringFormat.separator);
+        }
+    }
+  }
+
+  watchConfigurationChanges() {
+    if (this.cleanupConfigWatcher) {
+        this.cleanupConfigWatcher();
+    }
+
+    const handleChange = (config) => {
+        console.log('[TDC DEBUG] Otrzymana konfiguracja:', JSON.stringify(config, null, 2));
+        if (config) {
+            console.log('[TDC] Wykryto zmianę konfiguracji TDC, aktualizowanie...');
+            this.updateConfig(config);
+        }
+    };
+
+    configWatcher.on('tdcConfigChanged', handleChange);
+    
+    this.cleanupConfigWatcher = () => {
+        configWatcher.off('tdcConfigChanged', handleChange);
+    };
+  }
+
+  async cleanup() {
+    await this.stopDigitalMonitoring();
+    
+    if (this.cleanupConfigWatcher) {
+      this.cleanupConfigWatcher();
+      this.cleanupConfigWatcher = null;
+    }
+    
+    this.resetCycle();
+    await logState('[TDC] Wyczyszczono zasoby TDC');
+  }
+
+async startCycle() {
+  console.log('[TDC] Start cyklu');
+   lectorController.startCycle();
+  // tu trzymamy wyniki z lektorów
+  this.currentCycle = {
+    active: true,
+    received: {}
+  };
+
+  // ustaw timeout (np. 5s), żeby nie wisiało w nieskończoność
+  this.currentCycle.timeout = setTimeout(() => {
+    console.log('[TDC] Timeout cyklu – nie wszystkie lectory odpowiedziały');
+    this.finishCycle();
+  }, this.config.cycleTimeout || 5000);
+}
+
+// wywoływane, gdy któryś lector przyśle ramkę
+onLectorFrame(name, data) {
+  if (!this.currentCycle?.active) return;
+
+  this.currentCycle.received[name] = data;
+
+  const expected = Object.keys(this.config.lectory).length;
+  const received = Object.keys(this.currentCycle.received).length;
+
+  if (received === expected) {
+    this.finishCycle();
+  }
+}
+
+finishCycle() {
+  if (!this.currentCycle?.active) return;
+  clearTimeout(this.currentCycle.timeout);
+
+  console.log('[TDC] CYKL ZAKOŃCZONY. Odczytane kody:');
+  console.log(this.currentCycle.received);
+
+  this.currentCycle.active = false;
+}
+
+  async handleCodeData(codeData) {
+    if (!this.currentCycle?.active || this.currentCycle.completed) {
+      await logState('[TDC] Otrzymano kod poza aktywnym cyklem - ignorowanie');
+      return;
+    }
+
+    if (this.currentCycle.received.code) {
+      await logState('[TDC] Otrzymano kolejny kod w tym samym cyklu - ignorowanie');
+      return;
+    }
+
+    this.currentCycle.received.code = {
+      code: codeData.code,
+      timestamp: codeData.timestamp || new Date().toISOString()
+    };
+
+    await logState(`[TDC] Zarejestrowano kod: ${codeData.code}`);
+    await this.checkCycleCompletion();
+  }
+
+  async handleLectorFrame(name, data) {
+  if (!this.currentCycle?.active || this.currentCycle.completed) return;
+
+  this.currentCycle.received.lectors[name] = data;
+
+  await logState(`[TDC] Odebrano ramkę od lectora ${name}: ${JSON.stringify(data)}`);
+
+  // sprawdzamy czy mamy komplet odpowiedzi
+  const expected = Object.keys(this.config.lectory).length;
+  const received = Object.keys(this.currentCycle.received.lectors).length;
+
+  if (received === expected) {
+    await this.completeCycle(true);
+  }
+}
+
+  async handleWeightData(weightData) {
+    if (!this.currentCycle?.active || this.currentCycle.completed) {
+      await logState('[TDC] Otrzymano wagę poza aktywnym cyklem - ignorowanie');
+      return;
+    }
+
+    if (this.currentCycle.received.weight) {
+      await logState('[TDC] Otrzymano kolejną wagę w tym samym cyklu - ignorowanie');
+      return;
+    }
+
+    this.currentCycle.received.weight = {
+      weight: weightData.weight,
+      timestamp: weightData.timestamp || new Date().toISOString()
+    };
+
+    await logState(`[TDC] Zarejestrowano wagę: ${weightData.weight}`);
+    await this.checkCycleCompletion();
+  }
+
+  async checkCycleCompletion() {
+    if (!this.currentCycle?.active || this.currentCycle.completed) return;
+
+    const { code, weight } = this.currentCycle.received;
+    const bothReceived = code && weight;
+    
+    if (this.config.waitForBoth) {
+      if (bothReceived) {
+        await this.completeCycle(true);
+      }
+    } else if (code || weight) {
+      await this.completeCycle(bothReceived);
+    }
+  }
+
+  async completeCycle(success) {
+    if (!this.currentCycle || this.currentCycle.completed) return;
+    
+    this.currentCycle.completed = true;
+    clearTimeout(this.currentCycle.timeout);
+
+    console.log("CYKL POSZEDŁ")
+    
+    this.emit('cycleCompleted', {
+      success,
+    });
+
+    await logState(`[TDC] Zakończono cykl ${success ? 'pomyślnie' : 'z błędami'}`);
+    setTimeout(() => this.resetCycle(), 100);
+  }
+
+  async handleTimeout() {
+    if (!this.currentCycle?.active || this.currentCycle.completed) return;
+
+    await logState('[TDC] Timeout - zakończenie cyklu z niekompletnymi danymi');
+    await this.completeCycle(false);
+  }
+
+  resetCycle() {
+    if (this.currentCycle?.timeout) {
+      clearTimeout(this.currentCycle.timeout);
+    }
+
+    this.currentCycle = {
+      active: false,
+      triggerTime: null,
+      triggerSource: null,
+      received: {
+        code: null,
+        weight: null
+      },
+      completed: false,
+      timeout: null,
+      plcSent: false,
+      plcError: null
+    };
+  }
+
+  setup(app) {
+    app.post('/api/tdc/trigger', async (req, res) => {
+      try {
+        const triggered = await this.startCycle('api');
+        res.json({
+          success: triggered,
+          message: triggered ? 'Rozpoczęto nowy cykl' : 'Cykl już aktywny - ignorowanie'
+        });
+      } catch (err) {
+        res.status(500).json({
+          success: false,
+          error: err.message
+        });
+      }
+    });
+
+    app.get('/api/tdc/status', (req, res) => {
+      res.json(this.getStatus());
+    });
+
+    app.get('/api/tdc/config', (req, res) => {
+      res.json(this.config);
+    });
+
+    app.post('/api/tdc/digital-monitoring/start', async (req, res) => {
+      try {
+        await this.startDigitalMonitoring();
+        res.json({ success: true, message: 'Monitorowanie digital IO uruchomione' });
+      } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+      }
+    });
+
+    app.post('/api/tdc/digital-monitoring/stop', async (req, res) => {
+      try {
+        await this.stopDigitalMonitoring();
+        res.json({ success: true, message: 'Monitorowanie digital IO zatrzymane' });
+      } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+      }
+    });
+
+    app.get('/api/results', (req, res) => {
+      if (!fs.existsSync(resultsFile)) {
+        return res.status(404).json({ error: 'Plik results.json nie istnieje' });
+      }
+
+      try {
+        const data = JSON.parse(fs.readFileSync(resultsFile, 'utf8'));
+        res.json(data);
+      } catch (e) {
+        console.error('[TDC] Błąd odczytu results.json:', e.message);
+        res.status(500).json({ error: 'Błąd odczytu pliku' });
+      }
+    });
+
+    // DODANE: Endpointy do zarządzania wysyłką RS
+    app.get('/api/tdc/rs-sender/status', (req, res) => {
+      res.json(rsSender.getStatus());
+    });
+
+    app.post('/api/tdc/rs-sender/send-codes', async (req, res) => {
+      try {
+        const { codes } = req.body;
+        if (!codes || !Array.isArray(codes)) {
+          return res.status(400).json({ 
+            success: false, 
+            error: 'Parametr "codes" musi być tablicą' 
+          });
+        }
+        
+        const result = await rsSender.sendCodes(codes);
+        res.json({ success: true, result });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    app.post('/api/tdc/rs-sender/abort', (req, res) => {
+      rsSender.abortSending();
+      res.json({ success: true, message: 'Wysyłka przerwana' });
+    });
+
+    app.get('/api/tdc/rs-sender/results', (req, res) => {
+      try {
+        const resultsFile = path.join(__dirname, 'rs_send_results.json');
+        if (!fs.existsSync(resultsFile)) {
+          return res.json([]);
+        }
+        
+        const data = JSON.parse(fs.readFileSync(resultsFile, 'utf8'));
+        res.json(data);
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+  }
+
+  getStatus() {
+    return {
+      active: this.currentCycle.active,
+      triggerSource: this.currentCycle.triggerSource,
+      triggerTime: this.currentCycle.triggerTime,
+      received: this.currentCycle.received,
+      config: this.config,
+      digitalMonitoring: {
+        active: this.digitalMonitoringActive,
+        states: this.previousDigitalStates
+      },
+      digitalIOStatus: digitalIOManager.getStatus(),
+      rsSenderStatus: rsSender.getStatus() // DODANE
+    };
+  }
+}
+
+module.exports = new TDCController();

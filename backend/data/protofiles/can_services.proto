@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package hal.can;
+
+import "google/protobuf/empty.proto";
+
+// --- Definicje wiadomości ---
+
+message GetInterfaceNameRequest {
+  string interfaceName = 1;
+}
+
+message GetBitrateResponse {
+  int32 bitrate = 1; // bitrate w kbps np. 500
+}
+
+message GetBusStateResponse {
+  enum BusState {
+    UNKNOWN = 0;
+    ERROR_ACTIVE = 1;
+    ERROR_PASSIVE = 2;
+    BUS_OFF = 3;
+  }
+  BusState state = 1;
+}
+
+message GetInterfaceToContainerMappingResponse {
+  message Item {
+    string interfaceName = 1;
+    string containerName = 2; // pusta string = host
+  }
+  repeated Item items = 1;
+}
+
+message GetStatisticsResponse {
+  uint64 rxFrames = 1;
+  uint64 txFrames = 2;
+  uint64 rxErrors = 3;
+  uint64 txErrors = 4;
+}
+
+message GetTerminationResponse {
+  bool terminationEnabled = 1;
+}
+
+message GetTransceiverPowerResponse {
+  bool powerOn = 1;
+}
+
+message ListInterfacesRequest {
+  // Można dodać filtry, na razie puste
+}
+
+message ListInterfacesResponse {
+  repeated string interfaceNames = 1;
+}
+
+message SetInterfaceToContainerRequest {
+  string interfaceName = 1;
+  string containerName = 2; // pusta oznacza host
+}
+
+message SetTerminationRequest {
+  string interfaceName = 1;
+  bool enableTermination = 2;
+}
+
+message SetTransceiverPowerRequest {
+  string interfaceName = 1;
+  bool powerOn = 2;
+}
+
+// --- Definicja serwisu ---
+
+service Can {
+  rpc GetBitrate(GetInterfaceNameRequest) returns (GetBitrateResponse);
+  rpc GetBusState(GetInterfaceNameRequest) returns (GetBusStateResponse);
+  rpc GetInterfaceToContainerMapping(google.protobuf.Empty) returns (GetInterfaceToContainerMappingResponse);
+  rpc GetStatistics(GetInterfaceNameRequest) returns (GetStatisticsResponse);
+  rpc GetTermination(GetInterfaceNameRequest) returns (GetTerminationResponse);
+  rpc GetTransceiverPower(GetInterfaceNameRequest) returns (GetTransceiverPowerResponse);
+  rpc ListInterfaces(ListInterfacesRequest) returns (ListInterfacesResponse);
+  rpc SetInterfaceToContainer(SetInterfaceToContainerRequest) returns (google.protobuf.Empty);
+  rpc SetTermination(SetTerminationRequest) returns (google.protobuf.Empty);
+  rpc SetTransceiverPower(SetTransceiverPowerRequest) returns (google.protobuf.Empty);
+}

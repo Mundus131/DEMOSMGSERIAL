@@ -1,0 +1,44 @@
+/**
+ * Temperature sensor service.
+ *
+ * Service that provides device temperature sensor reading
+ */
+syntax = "proto3";
+
+package hal.temperaturesensor;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "./protos;protos";
+
+
+message TemperatureSensorDevice {
+  string name = 1;
+}
+
+/**
+ * Represents the ListDevice response data.
+ */
+message TemperatureSensorListDeviceResponse {
+  repeated TemperatureSensorDevice devices = 1;
+}
+
+message TemperatureSensorReadRequest {
+  string name = 1;
+}
+
+message TemperatureSensorReadResponse {
+  float value = 1;
+  string unit = 2;
+}
+
+/**
+ * Service exposing TemperatureSensor functions.
+ */
+service TemperatureSensor {
+  /// Used to retrieve all available temperature sensors
+  rpc ListDevices(google.protobuf.Empty) returns (TemperatureSensorListDeviceResponse) {}
+
+  /// Used to read value of a particular temperature sensor.
+  rpc Read(TemperatureSensorReadRequest) returns (TemperatureSensorReadResponse) {}
+}

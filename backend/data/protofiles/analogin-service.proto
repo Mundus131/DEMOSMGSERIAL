@@ -1,0 +1,81 @@
+/**
+ * AnalogIn service.
+ *
+ * Service that enables a control of the AnalogIn features of device
+ */
+syntax = "proto3";
+
+package hal.analogin;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "./protos;protos";
+
+enum AnalogInMode {
+  Voltage = 0;
+  Current = 1;
+}
+
+enum AnalogInUnits {
+  V = 0;
+  mA = 1;
+}
+
+message AnalogInDevice {
+  string name = 1;
+  AnalogInMode mode = 2;
+}
+
+/**
+ * Represents the ListDevice response data.
+ */
+message AnalogInListDeviceResponse {
+  repeated AnalogInDevice devices = 1;
+}
+
+/**
+ * Represents the Read request data.
+ */
+message AnalogInReadRequest {
+  string name = 1;
+}
+
+/**
+ * Represents the Read response data.
+ */
+message AnalogInReadResponse {
+  uint32 adcRaw = 1;
+  float converted = 2;
+  AnalogInUnits unit = 3;
+}
+
+/**
+ * Represents the SetMeasureMode request data.
+ */
+message AnalogInSetMeasureModeRequest {
+  string name = 1;
+  AnalogInMode mode = 2;
+}
+
+message AnalogInAttachResponse {
+  string channel = 1;
+  string status = 2;
+  string timestamp = 3;
+}
+
+/**
+ * Service exposing AnalogIn functions.
+ */
+service AnalogIN {
+  /// Used to retrieve all available analog input devices.
+  rpc ListDevices(google.protobuf.Empty) returns (AnalogInListDeviceResponse) {}
+
+  /// Used to read value of a particular analog input channel.
+  rpc Read(AnalogInReadRequest) returns (AnalogInReadResponse) {}
+  
+  /// Used to set measure mode of a particular analog input channel.
+  rpc SetMeasureMode(AnalogInSetMeasureModeRequest) returns (google.protobuf.Empty) {}
+
+  /// Used to monitor for overcurrent events
+  rpc Attach(google.protobuf.Empty) returns (stream AnalogInAttachResponse) {}
+}

@@ -1,0 +1,166 @@
+/**
+ * IMU Sensor Service.
+ *
+ * Service that enables a control of the Magnetometer and IMU sensors
+ */
+syntax = "proto3";
+
+package hal.imu;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "./protos;protos";
+
+message Channels {
+  string name = 1;
+  float value = 2;
+}
+
+/**
+ * Represents the ReadSampleRaw response data.
+ */
+message ReadSampleRawResponse {
+  repeated Channels channels = 1;
+}
+
+/**
+ * Represents the ReadSampleScaled response data.
+ */
+message ReadSampleScaledResponse {
+  repeated Channels channels = 1;
+}
+
+/**
+ * Represents the ReadBufferedDataStream request data.
+ */
+message ReadBufferedDataStreamRequest {
+  string deviceName = 1;
+  int32 filterLength = 2;
+}
+
+message RawDataStream {
+  int32 X = 1;
+  int32 Y = 2;
+  int32 Z = 3;
+}
+
+message ScaledDataStream {
+  float X = 1;
+  float Y = 2;
+  float Z = 3;
+}
+
+message MaxDataStream {
+  RawDataStream raw = 1;
+  ScaledDataStream scaled = 2;
+}
+
+message MinDataStream {
+  RawDataStream raw = 1;
+  ScaledDataStream scaled = 2;
+}
+
+/**
+ * Represents the ReadBufferedDataStream response data.
+ */
+message ReadBufferedDataStreamResponse {
+  RawDataStream raw = 1;
+  ScaledDataStream scaled = 2;
+  MaxDataStream max = 3;
+  MinDataStream min = 4;
+  string timestamp = 5;
+}
+
+/**
+ * Represents the GetCurrentScale response data.
+ */
+message GetCurrentScaleResponse {
+  float scale = 1;
+}
+
+/**
+ * Represents the GetAvailableScales response data.
+ */
+message GetAvailableScalesResponse {
+  repeated float scales = 1;
+}
+
+/**
+ * Represents the SetScale request data.
+ */
+message SetScaleRequest {
+  string deviceName = 1;
+  float scale = 2;
+}
+
+/**
+ * Represents the GetCurrentSamplingFrequency response data.
+ */
+message GetCurrentSamplingFrequencyResponse {
+  float frequency = 1;
+}
+
+/**
+ * Represents the GetAvailableSamplingFrequency response data.
+ */
+message GetAvailableSamplingFrequencyResponse {
+  repeated float frequencies = 1;
+}
+
+/**
+ * Represents the SetSamplingFrequency request data.
+ */
+message SetSamplingFrequencyRequest {
+  string deviceName = 1;
+  float frequency = 2;
+}
+
+message ChooseDeviceRequest {
+  string deviceName = 1;
+}
+
+message ImuDeviceResponse {
+  string name = 1;
+}
+
+/**
+ * Represents the ListDevice response data.
+ */
+message ImuListDevicesResponse {
+  repeated ImuDeviceResponse devices = 1;
+}
+
+/**
+ * Service exposing IMU sensor functions.
+ */
+service Imu {
+  /// Used to retrive raw samples from sensors
+  rpc ReadSampleRaw(ChooseDeviceRequest) returns (ReadSampleRawResponse) {}
+
+  /// Used to retrive scaled samples from sensors
+  rpc ReadSampleScaled(ChooseDeviceRequest) returns (ReadSampleScaledResponse) {}
+
+  /// Used to stream scaled and raw samples from sensors
+  rpc ReadBufferedDataStream(ReadBufferedDataStreamRequest) returns (stream ReadBufferedDataStreamResponse) {}
+
+  /// Used to retrieve current scales
+  rpc GetCurrentScale(ChooseDeviceRequest) returns (GetCurrentScaleResponse) {}
+
+  /// Used to retrieve available scales
+  rpc GetAvailableScales(ChooseDeviceRequest) returns (GetAvailableScalesResponse) {}
+
+  /// Used to write scale value
+  rpc SetScale(SetScaleRequest) returns (google.protobuf.Empty) {}
+
+  /// Used to retrieve current sampling frequency
+  rpc GetCurrentSamplingFrequency(ChooseDeviceRequest) returns (GetCurrentSamplingFrequencyResponse) {}
+
+  /// Used to retrieve available sampling frequency
+  rpc GetAvailableSamplingFrequency(ChooseDeviceRequest) returns (GetAvailableSamplingFrequencyResponse) {}
+
+  /// Used to write sampling frequency value
+  rpc SetSamplingFrequency(SetSamplingFrequencyRequest) returns (google.protobuf.Empty) {}
+
+  // Used to get all available devices
+  rpc ListDevices(google.protobuf.Empty) returns (ImuListDevicesResponse) {}
+}
