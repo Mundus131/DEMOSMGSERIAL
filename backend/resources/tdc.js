@@ -1,15 +1,20 @@
 const EventEmitter = require('events');
 const configWatcher = require('./configWatcher');
 const { logState, logDataFrame } = require('./logger');
-const config  = require('../data/configuration/configuration.json');
 const { digitalIOManager } = require('./digitalio');
 const { decodeControlSequences } = require('./utils');
 const MultiLectorController = require('./multiLector');
+const RFIDController = require('./rfidController');
 const rsSender = require('./rsSender');
 const fs = require('fs');
 const path = require('path');
-console.log(config.lectory)
-const lectorController = new MultiLectorController(config.lectory, 2112);
+let lectorController = null;
+let lectorConfig = null;
+let lectorPort = 2112;
+let currentMode = 'lectory';
+let rfidController = null;
+let rfidConfig = null;
+let tdcInstance = null;
 
 function countValidCodes(results) {
   const { przód, tył, lewy, prawy } = results;
@@ -238,9 +243,11 @@ async function setDigitalOutputsForAnalysis(analysis) {
   await digitalIOManager.write("DIO_A", isValid ? "HIGH" : "LOW");
   
   // DIO_B - niepełny odczyt (0-3 lub 5 kodów)
-  const isIncomplete = !isValid && validCodesCount > 0 && 
-                       ((scenarioType === 'scenario1' && validCodesCount < 4) ||
-                        (scenarioType === 'scenario2' && validCodesCount < 6));
+  const isIncomplete = scenarioType === 'rfid'
+    ? !isValid && validCodesCount > 0
+    : !isValid && validCodesCount > 0 && 
+      ((scenarioType === 'scenario1' && validCodesCount < 4) ||
+       (scenarioType === 'scenario2' && validCodesCount < 6));
   await digitalIOManager.write("DIO_B", isIncomplete ? "HIGH" : "LOW");
   
   // DIO_C - wariant 4-kodowy (scenariusz 1)
@@ -315,81 +322,232 @@ async function saveRSSendResult(sendResult, originalResults) {
   }
 }
 
-lectorController.startAll();
 const resultsFile = path.join(__dirname, 'results.json');
 
-// event po zakończeniu cyklu
-lectorController.on('cycleCompleted', async ({ success, results }) => {
-  console.log('===> Wyniki cyklu:', JSON.stringify(results, null, 2));
-  
-  // Analizuj scenariusz z wykrywaniem duplikatów
-  const analysis = analyzeScenarioWithDuplicates(results);
-  console.log(`[TDC] Analiza:`);
-  console.log(`  Typ scenariusza: ${analysis.scenarioType || 'brak'}`);
-  console.log(`  Poprawny: ${analysis.isValid}`);
-  console.log(`  Odczytanych kodów: ${analysis.validCodesCount}/${analysis.expectedCount || 'N/A'}`);
-  if (analysis.hasDuplicates) {
-    console.log(`  Duplikaty: przód=${analysis.duplicates.przod}, tył=${analysis.duplicates.tyl}`);
-  }
-  
-  // Ustaw wyjścia cyfrowe
-  await setDigitalOutputsForAnalysis(analysis);
-  
-  // Wysyłka RS jeśli jest przynajmniej 1 kod
-  if (analysis.validCodesCount > 0) {
+function stopLectors() {
+  if (lectorController) {
     try {
-      const codesToSend = extractCodesForScenario(results, analysis);
-      
-      if (codesToSend.length > 0) {
-        // Określ typ wysyłki
-        let sendType = '';
-        if (analysis.scenarioType && analysis.isValid) {
-          sendType = `scenariusz ${analysis.scenarioType}`;
-        } else if (analysis.validCodesCount === 1) {
-          sendType = 'pojedynczy kod';
-        } else if (analysis.validCodesCount >= 2 && analysis.validCodesCount <= 3) {
-          sendType = `częściowy odczyt (${analysis.validCodesCount} kody)`;
-        } else if (analysis.validCodesCount === 5) {
-          sendType = `5 kodów (prawie komplet)`;
-        }
-        
-        console.log(`[TDC] Rozpoczynanie wysyłki ${codesToSend.length} kodów przez RS (${sendType})`);
-        
-        // Dodaj informację o duplikatach do logowania
-        if (analysis.hasDuplicates) {
-          await logState(`[TDC] Wykryto duplikaty: przód=${analysis.duplicates.przod}, tył=${analysis.duplicates.tyl}`);
-        }
-        
-        await logState(`[TDC] Wysyłam ${codesToSend.length} kodów: ${codesToSend.join(', ')}`);
-        
-        const sendResult = await rsSender.sendCodes(codesToSend);
-        console.log('[TDC] Wynik wysyłki RS:', sendResult);
-        
-        // Zapis wyniku wysyłki z informacją o duplikatach
-        const enhancedSendResult = {
-          ...sendResult,
-          scenarioType: analysis.scenarioType || 'partial_read',
-          partialRead: !analysis.scenarioType || !analysis.isValid,
-          validCodesCount: analysis.validCodesCount,
-          hasDuplicates: analysis.hasDuplicates,
-          duplicates: analysis.duplicates,
-          codesSent: codesToSend
-        };
-        
-        await saveRSSendResult(enhancedSendResult, results);
-      } else {
-        console.log(`[TDC] Brak kodów do wysłania przez RS`);
-        await logState('[TDC] Brak kodów do wysłania przez RS');
-      }
+      lectorController.stopAll();
+      lectorController.removeAllListeners();
     } catch (error) {
-      console.error('[TDC] Błąd wysyłki RS:', error);
-      await logState(`[TDC] Błąd wysyłki RS: ${error.message}`);
+      console.error('[TDC] B??d zatrzymywania lector?w:', error);
     }
-  } else {
-    console.log(`[TDC] Nie wysyłam RS - brak kodów`);
-    await logState(`[TDC] Nie wysyłam RS - brak kodów`);
+    lectorController = null;
   }
-});
+}
+
+function stopRfid() {
+  if (rfidController) {
+    try {
+      rfidController.stopAll();
+      rfidController.removeAllListeners();
+    } catch (error) {
+      console.error('[RFID] B??d zatrzymywania czytnik?w:', error);
+    }
+    rfidController = null;
+  }
+}
+
+function attachLectorHandlers(controller) {
+  controller.on('cycleCompleted', async ({ success, results }) => {
+    console.log('===> Wyniki cyklu:', JSON.stringify(results, null, 2));
+    
+    // Analizuj scenariusz z wykrywaniem duplikat?w
+    const analysis = analyzeScenarioWithDuplicates(results);
+    console.log(`[TDC] Analiza:`);
+    console.log(`  Typ scenariusza: ${analysis.scenarioType || 'brak'}`);
+    console.log(`  Poprawny: ${analysis.isValid}`);
+    console.log(`  Odczytanych kod?w: ${analysis.validCodesCount}/${analysis.expectedCount || 'N/A'}`);
+    if (analysis.hasDuplicates) {
+      console.log(`  Duplikaty: prz?d=${analysis.duplicates.przod}, ty?=${analysis.duplicates.tyl}`);
+    }
+    
+    // Ustaw wyj?cia cyfrowe
+    await setDigitalOutputsForAnalysis(analysis);
+    
+    // Wysy?ka RS je?li jest przynajmniej 1 kod
+    if (analysis.validCodesCount > 0) {
+      try {
+        const codesToSend = extractCodesForScenario(results, analysis);
+        
+        if (codesToSend.length > 0) {
+          // Okre?l typ wysy?ki
+          let sendType = '';
+          if (analysis.scenarioType && analysis.isValid) {
+            sendType = `scenariusz ${analysis.scenarioType}`;
+          } else if (analysis.validCodesCount === 1) {
+            sendType = 'pojedynczy kod';
+          } else if (analysis.validCodesCount >= 2 && analysis.validCodesCount <= 3) {
+            sendType = `cz??ciowy odczyt (${analysis.validCodesCount} kody)`;
+          } else if (analysis.validCodesCount === 5) {
+            sendType = `5 kod?w (prawie komplet)`;
+          }
+          
+          console.log(`[TDC] Rozpoczynanie wysy?ki ${codesToSend.length} kod?w przez RS (${sendType})`);
+          
+          // Dodaj informacj? o duplikatach do logowania
+          if (analysis.hasDuplicates) {
+            await logState(`[TDC] Wykryto duplikaty: prz?d=${analysis.duplicates.przod}, ty?=${analysis.duplicates.tyl}`);
+          }
+          
+          await logState(`[TDC] Wysy?am ${codesToSend.length} kod?w: ${codesToSend.join(', ')}`);
+          
+          const sendResult = await rsSender.sendCodes(codesToSend);
+          console.log('[TDC] Wynik wysy?ki RS:', sendResult);
+          
+          // Zapis wyniku wysy?ki z informacj? o duplikatach
+          const enhancedSendResult = {
+            ...sendResult,
+            scenarioType: analysis.scenarioType || 'partial_read',
+            partialRead: !analysis.scenarioType || !analysis.isValid,
+            validCodesCount: analysis.validCodesCount,
+            hasDuplicates: analysis.hasDuplicates,
+            duplicates: analysis.duplicates,
+            codesSent: codesToSend
+          };
+          
+          await saveRSSendResult(enhancedSendResult, results);
+        } else {
+          console.log(`[TDC] Brak kod?w do wys?ania przez RS`);
+          await logState('[TDC] Brak kod?w do wys?ania przez RS');
+        }
+      } catch (error) {
+        console.error('[TDC] B??d wysy?ki RS:', error);
+        await logState(`[TDC] B??d wysy?ki RS: ${error.message}`);
+      }
+    } else {
+      console.log(`[TDC] Nie wysy?am RS - brak kod?w`);
+      await logState(`[TDC] Nie wysy?am RS - brak kod?w`);
+    }
+  });
+}
+
+async function handleRfidCycle(results) {
+  const allCodes = [];
+  const seen = new Set();
+
+  for (const codes of Object.values(results || {})) {
+    for (const code of codes || []) {
+      if (!code || code === 'NoRead' || code === 'NORREAD') continue;
+      if (!seen.has(code)) {
+        seen.add(code);
+        allCodes.push(code);
+      }
+    }
+  }
+
+  const expectedTags = rfidConfig?.expectedTags || configWatcher.lastConfig?.rfid?.expectedTags || 0;
+  const expectedCount = Number(expectedTags) || 0;
+  const isValidRead = expectedCount > 0 ? allCodes.length >= expectedCount : allCodes.length > 0;
+
+  console.log(`[RFID] Wyekstrahowano ${allCodes.length} unikalnych kod?w (oczekiwane: ${expectedCount || 'brak'})`);
+
+  await setDigitalOutputsForAnalysis({
+    scenarioType: 'rfid',
+    isValid: isValidRead,
+    validCodesCount: allCodes.length,
+    expectedCount: expectedCount || 0,
+    hasDuplicates: false,
+    duplicates: { total: 0 }
+  });
+
+  if (tdcInstance?.emitRfidCycle) {
+    tdcInstance.emitRfidCycle({
+      timestamp: new Date().toISOString(),
+      uniqueCount: allCodes.length,
+      expectedCount: expectedCount || 0,
+      goodRead: isValidRead,
+      results
+    });
+  }
+
+  if (allCodes.length === 0) {
+    await logState('[RFID] Brak kod?w do wysy?ki przez RS');
+    return;
+  }
+
+  await logState(`[RFID] Wysy?am ${allCodes.length} kod?w: ${allCodes.join(', ')}`);
+  try {
+    const sendResult = await rsSender.sendCodes(allCodes);
+    await saveRSSendResult({
+      ...sendResult,
+      scenarioType: 'rfid',
+      partialRead: !isValidRead,
+      validCodesCount: allCodes.length,
+      expectedCount: expectedCount || null,
+      hasDuplicates: false,
+      duplicates: { total: 0 },
+      codesSent: allCodes
+    }, results);
+  } catch (error) {
+    console.error('[RFID] B??d wysy?ki RS:', error);
+    await logState(`[RFID] B??d wysy?ki RS: ${error.message}`);
+  }
+}
+
+function attachRfidHandlers(controller) {
+  controller.on('cycleCompleted', async ({ success, results }) => {
+    console.log('===> Wyniki cyklu RFID:', JSON.stringify(results, null, 2));
+    await handleRfidCycle(results);
+  });
+}
+
+function startLectors(config) {
+  if (!config || Object.keys(config).length === 0) {
+    console.log('[TDC] Brak konfiguracji lektor?w - nie uruchamiam po??cze?');
+    return;
+  }
+  const controller = new MultiLectorController(config, lectorPort);
+  attachLectorHandlers(controller);
+  controller.startAll();
+  lectorController = controller;
+}
+
+function startRfid(config) {
+  const readers = config?.readers || [];
+  if (!Array.isArray(readers) || readers.length === 0) {
+    console.log('[RFID] Brak konfiguracji czytnik?w - nie uruchamiam po??cze?');
+    return;
+  }
+  const controller = new RFIDController(readers);
+  attachRfidHandlers(controller);
+  controller.startAll();
+  rfidController = controller;
+}
+
+function applySystemConfig(systemConfig, tdcInstance) {
+  const nextMode = systemConfig?.mode || currentMode || 'lectory';
+  currentMode = nextMode;
+
+  const nextLectors = systemConfig?.lectory || {};
+  if (tdcInstance) {
+    tdcInstance.config.lectory = nextLectors;
+  }
+
+  if (currentMode === 'lectory') {
+    const nextLectorsJson = JSON.stringify(nextLectors);
+    const prevLectorsJson = lectorConfig ? JSON.stringify(lectorConfig) : null;
+    if (prevLectorsJson !== nextLectorsJson) {
+      stopLectors();
+      stopRfid();
+      lectorConfig = nextLectors;
+      startLectors(lectorConfig);
+    }
+    return;
+  }
+
+  // tryb RFID
+  stopLectors();
+
+  const nextRfid = systemConfig?.rfid || {};
+  const nextRfidJson = JSON.stringify(nextRfid);
+  const prevRfidJson = rfidConfig ? JSON.stringify(rfidConfig) : null;
+  if (prevRfidJson !== nextRfidJson) {
+    stopRfid();
+    rfidConfig = nextRfid;
+    startRfid(rfidConfig);
+  }
+}
 
 class TDCController extends EventEmitter {
   constructor() {
@@ -411,10 +569,15 @@ class TDCController extends EventEmitter {
     this.digitalMonitoringActive = false;
     this.previousDigitalStates = {};
     this.monitoringInterval = null;
+    this.monitoredPins = [];
   }
 
   async initialize() {
     await this.updateConfig(configWatcher.lastConfig?.tdc);
+    if (configWatcher.lastConfig) {
+      this.config.lectory = configWatcher.lastConfig.lectory || {};
+      applySystemConfig(configWatcher.lastConfig, this);
+    }
     this.watchConfigurationChanges();
     await logState('[TDC] Inicjalizacja kontrolera TDC');
     this.resetCycle();
@@ -427,37 +590,59 @@ class TDCController extends EventEmitter {
     }
 
     this.digitalMonitoringActive = true;
-    const pinName = 'DI_A';
+    const triggerPin = 'DI_A';
     const checkIntervalMs = 50;
     digitalIOManager.setDirection('DIO_A',"OUT")
-    await logState(`[TDC] Rozpoczynam monitorowanie ${pinName} co ${checkIntervalMs}ms`);
+    await logState(`[TDC] Rozpoczynam monitorowanie wejść cyfrowych co ${checkIntervalMs}ms`);
+
+    try {
+      const devices = await digitalIOManager.listDevices();
+      this.monitoredPins = (devices || [])
+        .map(device => device.name)
+        .filter(Boolean);
+    } catch (error) {
+      await logState(`[TDC] Błąd pobierania listy wejść: ${error.message}`);
+      this.monitoredPins = [];
+    }
+
+    if (this.monitoredPins.length === 0) {
+      this.monitoredPins = [triggerPin];
+    }
 
     try {
       // Inicjalizacja stanu
-      const initialState = await digitalIOManager.read(pinName);
-      this.previousDigitalStates[pinName] = initialState;
-      await logState(`[TDC] Stan początkowy ${pinName}: ${initialState}`);
+      for (const pin of this.monitoredPins) {
+        try {
+          const initialState = await digitalIOManager.read(pin);
+          this.previousDigitalStates[pin] = initialState;
+          await logState(`[TDC] Stan początkowy ${pin}: ${initialState}`);
+        } catch (error) {
+          await logState(`[TDC] Błąd odczytu stanu początkowego ${pin}: ${error.message}`);
+          this.previousDigitalStates[pin] = 'LOW';
+        }
+      }
     } catch (error) {
-      await logState(`[TDC] Błąd odczytu stanu początkowego ${pinName}: ${error.message}`);
-      this.previousDigitalStates[pinName] = 'LOW'; // Domyślny stan
+      await logState(`[TDC] Błąd odczytu stanu początkowego: ${error.message}`);
     }
 
     const monitorLoop = async () => {
       if (!this.digitalMonitoringActive) return;
 
       try {
-        const currentState = await digitalIOManager.read(pinName);
-        const previousState = this.previousDigitalStates[pinName];
+        for (const pin of this.monitoredPins) {
+          const currentState = await digitalIOManager.read(pin);
+          const previousState = this.previousDigitalStates[pin];
 
-        // Detekcja zbocza narastającego (LOW -> HIGH)
-        if (previousState === 'LOW' && currentState === 'HIGH') {
-          await logState(`[TDC] Zbocze narastające na ${pinName} - wyzwalanie cyklu`);
-          await this.startCycle(`digital-read:${pinName}`);
+          // Detekcja zbocza narastającego (LOW -> HIGH) na wejściu triggera
+          if (pin === triggerPin && previousState === 'LOW' && currentState === 'HIGH') {
+            await logState(`[TDC] Zbocze narastające na ${pin} - wyzwalanie cyklu`);
+            await this.startCycle(`digital-read:${pin}`);
+          }
+
+          this.previousDigitalStates[pin] = currentState;
         }
-
-        this.previousDigitalStates[pinName] = currentState;
       } catch (error) {
-        await logState(`[TDC] Błąd monitorowania ${pinName}: ${error.message}`);
+        await logState(`[TDC] Błąd monitorowania wejść: ${error.message}`);
       }
 
       // Kontynuacja monitorowania
@@ -553,15 +738,35 @@ class TDCController extends EventEmitter {
         }
     };
 
+    const handleLectorChange = (lectorsConfig) => {
+      applySystemConfig({ ...configWatcher.lastConfig, lectory: lectorsConfig }, this);
+    };
+
+    const handleModeChange = (mode) => {
+      applySystemConfig({ ...configWatcher.lastConfig, mode }, this);
+    };
+
+    const handleRfidChange = (rfidConfig) => {
+      applySystemConfig({ ...configWatcher.lastConfig, rfid: rfidConfig }, this);
+    };
+
     configWatcher.on('tdcConfigChanged', handleChange);
+    configWatcher.on('lectorsConfigChanged', handleLectorChange);
+    configWatcher.on('modeChanged', handleModeChange);
+    configWatcher.on('rfidConfigChanged', handleRfidChange);
     
     this.cleanupConfigWatcher = () => {
         configWatcher.off('tdcConfigChanged', handleChange);
+        configWatcher.off('lectorsConfigChanged', handleLectorChange);
+        configWatcher.off('modeChanged', handleModeChange);
+        configWatcher.off('rfidConfigChanged', handleRfidChange);
     };
   }
 
   async cleanup() {
     await this.stopDigitalMonitoring();
+    stopLectors();
+    stopRfid();
     
     if (this.cleanupConfigWatcher) {
       this.cleanupConfigWatcher();
@@ -574,19 +779,40 @@ class TDCController extends EventEmitter {
 
 async startCycle() {
   console.log('[TDC] Start cyklu');
-   lectorController.startCycle();
-  // tu trzymamy wyniki z lektorów
+
+  if (this.currentCycle?.active) {
+    return false;
+  }
+
+  if (currentMode === 'rfid') {
+    if (rfidController) {
+      rfidController.startCycle();
+      return true;
+    }
+    return false;
+  }
+
+  if (!lectorController) {
+    return false;
+  }
+
+  lectorController.startCycle();
+
+  // tu trzymamy wyniki z lektor?w
   this.currentCycle = {
     active: true,
     received: {}
   };
 
-  // ustaw timeout (np. 5s), żeby nie wisiało w nieskończoność
+  // ustaw timeout (np. 5s), ?eby nie wisia?o w niesko?czono??
   this.currentCycle.timeout = setTimeout(() => {
-    console.log('[TDC] Timeout cyklu – nie wszystkie lectory odpowiedziały');
+    console.log('[TDC] Timeout cyklu ? nie wszystkie lectory odpowiedzia?y');
     this.finishCycle();
   }, this.config.cycleTimeout || 5000);
+
+  return true;
 }
+
 
 // wywoływane, gdy któryś lector przyśle ramkę
 onLectorFrame(name, data) {
@@ -727,6 +953,26 @@ finishCycle() {
   }
 
   setup(app) {
+    app.get('/api/rfid/events', (req, res) => {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      const sendEvent = (payload) => {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      };
+
+      const handleCycle = (payload) => {
+        sendEvent(payload);
+      };
+
+      this.on('rfidCycleCompleted', handleCycle);
+
+      req.on('close', () => {
+        this.off('rfidCycleCompleted', handleCycle);
+      });
+    });
+
     app.post('/api/tdc/trigger', async (req, res) => {
       try {
         const triggered = await this.startCycle('api');
@@ -870,6 +1116,42 @@ app.get('/api/tdc/stats/duplicates', (req, res) => {
   }
 });
 
+    app.get('/api/tdc/rs-sender/mode', (req, res) => {
+      try {
+        res.json({ success: true, currentMode: rsSender.getMode() });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    app.post('/api/tdc/rs-sender/mode', (req, res) => {
+      try {
+        const { mode } = req.body;
+        rsSender.setMode(mode);
+        res.json({ success: true, currentMode: rsSender.getMode() });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    app.get('/api/tdc/rs-sender/timeout', (req, res) => {
+      try {
+        res.json({ success: true, timeoutMs: rsSender.getResponseTimeout() });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    app.post('/api/tdc/rs-sender/timeout', (req, res) => {
+      try {
+        const { timeoutMs } = req.body;
+        rsSender.setResponseTimeout(timeoutMs);
+        res.json({ success: true, timeoutMs: rsSender.getResponseTimeout() });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
 // Prostszy endpoint tylko dla UI - czy wysyłka jest aktywna
 app.get('/api/tdc/rs-sender/active', (req, res) => {
   try {
@@ -963,14 +1245,34 @@ app.get('/api/tdc/rs-sender/history', (req, res) => {
       triggerTime: this.currentCycle.triggerTime,
       received: this.currentCycle.received,
       config: this.config,
+      mode: currentMode,
       digitalMonitoring: {
         active: this.digitalMonitoringActive,
         states: this.previousDigitalStates
       },
       digitalIOStatus: digitalIOManager.getStatus(),
-      rsSenderStatus: rsSender.getStatus() // DODANE
+      rsSenderStatus: rsSender.getStatus(),
+      rfidStatus: this.getRfidStatus()
     };
+  }
+
+  emitRfidCycle(payload) {
+    this.emit('rfidCycleCompleted', payload);
+  }
+
+  getRfidStatus() {
+    if (rfidController) {
+      return rfidController.getStatus();
+    }
+    const fallbackReaders = (configWatcher.lastConfig?.rfid?.readers || []).map((reader, index) => ({
+      id: reader.id || ('RFID-' + (index + 1)),
+      ip: reader.ip,
+      port: reader.port,
+      lastRead: null
+    }));
+    return { active: false, readers: fallbackReaders };
   }
 }
 
-module.exports = new TDCController();
+tdcInstance = new TDCController();
+module.exports = tdcInstance;

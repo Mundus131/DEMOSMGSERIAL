@@ -1338,3 +1338,344 @@ body.industrial .status-grid-small .status-item {
 .industrial .rs-sender-status-panel .detail-value {
   background: #333;
 }
+/* === SYSTEM CONFIG TAB === */
+.config-tab {
+  background: white;
+  border-radius: 12px;
+  padding: 25px;
+  box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+  margin-top: 20px;
+}
+
+.config-section {
+  margin-bottom: 25px;
+}
+
+.config-section h3 {
+  margin-bottom: 15px;
+  color: #333;
+}
+
+.config-status {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.config-status.success {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.config-status.error {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.dio-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dio-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 120px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
+
+.dio-name {
+  font-weight: 600;
+  color: #333;
+}
+
+.dio-direction {
+  color: #666;
+}
+
+.dio-state {
+  text-align: center;
+  font-weight: 700;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.dio-state.state-high {
+  background: #d4edda;
+  color: #155724;
+}
+
+.dio-state.state-low {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.dio-state.state-unknown {
+  background: #e2e3e5;
+  color: #6c757d;
+}
+
+.dio-loading,
+.dio-empty {
+  padding: 10px 12px;
+  background: #f8f9fa;
+  border: 1px dashed #ced4da;
+  border-radius: 6px;
+  color: #666;
+}
+
+/* Industrial theme */
+body.industrial .config-tab {
+  background: linear-gradient(145deg, #2a2a2a, #1e1e1e);
+  border: 1px solid #404040;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+
+body.industrial .config-section h3 {
+  color: #fff;
+}
+
+body.industrial .dio-row {
+  background: #2a2a2a;
+  border-color: #404040;
+}
+
+body.industrial .dio-name,
+body.industrial .dio-direction {
+  color: #ddd;
+}
+
+body.industrial .dio-state.state-high {
+  background: rgba(76, 175, 80, 0.2);
+  color: #81c784;
+  border: 1px solid #4caf50;
+}
+
+body.industrial .dio-state.state-low {
+  background: rgba(244, 67, 54, 0.2);
+  color: #ef9a9a;
+  border: 1px solid #f44336;
+}
+
+body.industrial .dio-state.state-unknown {
+  background: rgba(158, 158, 158, 0.2);
+  color: #bdbdbd;
+  border: 1px solid #9e9e9e;
+}
+
+body.industrial .config-status.success {
+  background: rgba(40, 167, 69, 0.2);
+  color: #81c784;
+  border: 1px solid #4caf50;
+}
+
+body.industrial .config-status.error {
+  background: rgba(220, 53, 69, 0.2);
+  color: #ef9a9a;
+  border: 1px solid #f44336;
+}
+
+@media (max-width: 768px) {
+  .dio-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* RFID View */
+.rfid-view {
+  background: white;
+  border-radius: 12px;
+  padding: 25px;
+  box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+  margin-top: 20px;
+}
+
+.rfid-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  gap: 12px;
+}
+
+.rfid-cycle-time {
+  margin-bottom: 12px;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.rfid-goodread {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-weight: 700;
+  border: 2px solid transparent;
+  min-width: 160px;
+  text-align: center;
+}
+
+.rfid-goodread.good {
+  background: #d4edda;
+  color: #155724;
+  border-color: #c3e6cb;
+}
+
+.rfid-goodread.bad {
+  background: #f8d7da;
+  color: #721c24;
+  border-color: #f5c6cb;
+}
+
+.rfid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.rfid-card {
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8f9fa;
+}
+
+.rfid-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.rfid-card-title {
+  font-weight: 700;
+  color: #333;
+}
+
+.rfid-card-meta {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.rfid-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.rfid-tag {
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: #e3f2fd;
+  color: #1565c0;
+  font-size: 0.85rem;
+  font-family: 'Courier New', monospace;
+}
+
+.rfid-tag.empty {
+  background: #e2e3e5;
+  color: #6c757d;
+}
+
+.rfid-last-time {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+body.industrial .rfid-view {
+  background: linear-gradient(145deg, #2a2a2a, #1e1e1e);
+  border: 1px solid #404040;
+}
+
+body.industrial .rfid-goodread.good {
+  background: rgba(40, 167, 69, 0.2);
+  color: #81c784;
+  border: 1px solid #4caf50;
+}
+
+body.industrial .rfid-goodread.bad {
+  background: rgba(220, 53, 69, 0.2);
+  color: #ef9a9a;
+  border: 1px solid #f44336;
+}
+body.industrial .rfid-card {
+  background: #2a2a2a;
+  border-color: #404040;
+}
+
+body.industrial .rfid-card-title,
+body.industrial .rfid-card-meta,
+body.industrial .rfid-last-time {
+  color: #ddd;
+}
+
+body.industrial .rfid-cycle-time {
+  color: #bbb;
+}
+
+body.industrial .rfid-tag {
+  background: rgba(33, 150, 243, 0.2);
+  color: #64b5f6;
+  border: 1px solid #2196f3;
+}
+
+body.industrial .rfid-tag.empty {
+  background: rgba(158, 158, 158, 0.2);
+  color: #bdbdbd;
+  border: 1px solid #9e9e9e;
+}
+/* RFID Config */
+.rfid-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rfid-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 140px 120px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+}
+
+.rfid-row input {
+  padding: 8px 10px;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+}
+
+.rfid-empty {
+  padding: 10px 12px;
+  background: #f8f9fa;
+  border: 1px dashed #ced4da;
+  border-radius: 6px;
+  color: #666;
+}
+
+body.industrial .rfid-row {
+  background: #2a2a2a;
+  border-color: #404040;
+}
+
+body.industrial .rfid-row input {
+  background: #1a1a1a;
+  border-color: #404040;
+  color: #fff;
+}
+
+@media (max-width: 768px) {
+  .rfid-row {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,5 +1,5 @@
 {
-    "tdc": {
+  "tdc": {
     "deviceConfig": {
       "ipAddress": "192.168.0.100",
       "login": "admin",
@@ -9,10 +9,26 @@
     "cycleTimeout": 5000,
     "sendIncompleteData": true
   },
-  "lectory":{
-    "lewy": "192.168.0.2", 
+  "mode": "rfid",
+  "lectory": {
+    "lewy": "192.168.0.2",
     "prawy": "192.168.0.3",
     "przód": "192.168.0.1",
     "tył": "192.168.0.4"
+  },
+  "rfid": {
+    "expectedTags": 8,
+    "readers": [
+      {
+        "id": "RFID-1",
+        "ip": "192.168.0.1",
+        "port": 2112
+      },
+      {
+        "id": "RFID-2",
+        "ip": "192.168.0.2",
+        "port": 2112
+      }
+    ]
   }
 }

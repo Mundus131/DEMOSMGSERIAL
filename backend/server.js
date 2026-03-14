@@ -146,11 +146,122 @@ function setupRoutes() {
     }
   });
 
+  app.get('/api/digitalio/states', async (req, res) => {
+    try {
+      const devices = await digitalIOManager.listDevices();
+      const deviceList = Array.isArray(devices) ? devices : [];
+      const results = await Promise.all(deviceList.map(async (device) => {
+        const name = device?.name || device;
+        let state = 'UNKNOWN';
+        try {
+          state = await digitalIOManager.read(name);
+        } catch (error) {
+          state = 'ERROR';
+        }
+        return {
+          ...device,
+          name,
+          state
+        };
+      }));
+      res.json({ success: true, devices: results });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.post('/api/digitalio/write', async (req, res) => {
     try {
       const { name, state } = req.body;
       await digitalIOManager.write(name, state);
       res.json({ success: true, message: `Stan ${name} ustawiony na ${state}` });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // RS endpoints
+  app.get('/api/rs/config', (req, res) => {
+    try {
+      const config = rs.loadConfig();
+      res.json({ success: true, config });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/rs/config', (req, res) => {
+    try {
+      rs.saveConfig(req.body);
+      res.json({ success: true, message: 'Konfiguracja RS zapisana' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/rs/status', (req, res) => {
+    try {
+      const status = rs.getPortStatus();
+      res.json({ success: true, status });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/rs/read', (req, res) => {
+    try {
+      const data = rs.readData();
+      res.json({ success: true, data });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/rs/send', (req, res) => {
+    try {
+      const { data } = req.body;
+      const ok = rs.sendData(data);
+      if (!ok) {
+        return res.status(500).json({ success: false, error: 'Nie udało się wysłać danych' });
+      }
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/rs/restart', (req, res) => {
+    try {
+      rs.restartSerial();
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/rs/mode', async (req, res) => {
+    try {
+      const { mode } = req.body;
+      await rs.setMode(mode);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/rs/mode', async (req, res) => {
+    try {
+      const mode = await rs.getMode();
+      res.json({ success: true, mode });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/rfid/status', (req, res) => {
+    try {
+      const status = tdc.getRfidStatus ? tdc.getRfidStatus() : { active: false, readers: [] };
+      res.json({ success: true, status });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }

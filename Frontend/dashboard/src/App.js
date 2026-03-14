@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import './App.css';
 
 // Config
@@ -26,6 +26,13 @@ const config = {
   //API_BASE_URL: "http://192.168.0.100:18080/proxy/5010",// def only 
 };
 
+const getFrontBackKeys = (obj) => {
+  const keys = Object.keys(obj || {});
+  const frontKey = keys.find((key) => key.toLowerCase().includes('prz')) || 'przod';
+  const backKey = keys.find((key) => key.toLowerCase().includes('tyl')) || 'tyl';
+  return { frontKey, backKey };
+};
+
 // Komponent zakładki RS
 const RSConfigTab = () => {
   const [rsConfig, setRsConfig] = useState(null);
@@ -38,6 +45,7 @@ const RSConfigTab = () => {
   const [formData, setFormData] = useState({});
   const [configLoaded, setConfigLoaded] = useState(false);
   const [senderMode, setSenderMode] = useState('separate');
+  const [senderTimeout, setSenderTimeout] = useState(1000);
 
   // Pobierz konfigurację RS
   const fetchRsConfig = async () => {
@@ -104,6 +112,19 @@ const RSConfigTab = () => {
       console.error('Błąd pobierania statusu RS Sender:', error);
     }
   };
+  const fetchRsSenderTimeout = async () => {
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/api/tdc/rs-sender/timeout`);
+      const result = await response.json();
+      if (result.success) {
+        setSenderTimeout(result.timeoutMs);
+      }
+    } catch (error) {
+      console.error('B??d pobierania timeoutu RS Sender:', error);
+    }
+  };
+
+
 
   // Pobierz szczegółowy status RS Sender
   const fetchRsSenderDetailedStatus = async () => {
@@ -221,6 +242,29 @@ const RSConfigTab = () => {
       console.error('Błąd restartowania RS:', error);
     }
   };
+  const setRsSenderTimeout = async () => {
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/api/tdc/rs-sender/timeout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ timeoutMs: Number(senderTimeout) }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        setSenderTimeout(result.timeoutMs);
+        alert(`Timeout ustawiony na: ${result.timeoutMs} ms`);
+      } else {
+        alert('B??d ustawiania timeoutu: ' + result.error);
+      }
+    } catch (error) {
+      console.error('B??d ustawiania timeoutu RS Sender:', error);
+      alert('B??d ustawiania timeoutu RS Sender');
+    }
+  };
+
+
 
   // Wyślij dane przez RS
   const sendRsData = async (data) => {
@@ -294,7 +338,9 @@ const RSConfigTab = () => {
     fetchRsData();
     fetchRsSenderStatus();
     fetchRsSenderDetailedStatus();
+        fetchRsSenderTimeout();
     fetchRsSenderMode();
+    fetchRsSenderTimeout();
 
     const interval = setInterval(() => {
       fetchRsStatus();
@@ -486,6 +532,25 @@ const RSConfigTab = () => {
               <span className={`mode-value ${senderMode === 'separate' ? 'mode-separate' : 'mode-combined'}`}>
                 {senderMode === 'separate' ? 'SEPARATE' : 'COMBINED'}
               </span>
+            </div>
+
+            <div className="sender-timeout-config">
+              <h5>Timeout odpowiedzi (ms)</h5>
+              <div className="timeout-row">
+                <input
+                  type="number"
+                  min="100"
+                  step="100"
+                  value={senderTimeout}
+                  onChange={(e) => setSenderTimeout(e.target.value)}
+                />
+                <button
+                  className="btn btn-primary"
+                  onClick={setRsSenderTimeout}
+                >
+                  Zapisz
+                </button>
+              </div>
             </div>
           </div>
 
@@ -708,6 +773,512 @@ const RSConfigTab = () => {
   );
 };
 
+const SystemConfigTab = ({ systemMode }) => {
+  const [formData, setFormData] = useState({
+    mode: systemMode || 'lectory',
+    cycleTimeout: 5000,
+    lectory: {
+      lewy: '',
+      prawy: '',
+      front: '',
+      back: ''
+    },
+    expectedTags: '',
+    rfidReaders: []
+  });
+  const [lectoryKeys, setLectorsKeys] = useState({ frontKey: 'przod', backKey: 'tyl' });
+  const [configLoaded, setConfigLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [saveStatus, setSaveStatus] = useState(null);
+  const [digitalStatus, setDigitalStatus] = useState(null);
+
+  const fetchConfig = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/api/configuration`);
+      const result = await response.json();
+      const lectoryConfig = result.lectory || {};
+      const { frontKey, backKey } = getFrontBackKeys(lectoryConfig);
+
+      setLectorsKeys({ frontKey, backKey });
+      setFormData({
+        mode: result.mode || 'lectory',
+        cycleTimeout: result.tdc?.cycleTimeout || 5000,
+        lectory: {
+          lewy: lectoryConfig.lewy || '',
+          prawy: lectoryConfig.prawy || '',
+          front: lectoryConfig[frontKey] || '',
+          back: lectoryConfig[backKey] || ''
+        },
+        expectedTags: result.rfid?.expectedTags ?? '',
+        rfidReaders: (result.rfid?.readers || []).map((reader, index) => ({
+          id: reader.id || `RFID-${index + 1}`,
+          ip: reader.ip || '',
+          port: reader.port || ''
+        }))
+      });
+      setConfigLoaded(true);
+    } catch (error) {
+      console.error('Błąd pobierania konfiguracji:', error);
+      setSaveStatus({ type: 'error', message: 'Błąd pobierania konfiguracji' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchDigitalStatus = async () => {
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/api/tdc/status`);
+      const result = await response.json();
+      setDigitalStatus(result);
+    } catch (error) {
+      console.error('Błąd pobierania statusu TDC:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchConfig();
+    fetchDigitalStatus();
+
+    const interval = setInterval(() => {
+      fetchDigitalStatus();
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (systemMode) {
+      setFormData((prev) => ({ ...prev, mode: systemMode }));
+    }
+  }, [systemMode]);
+
+  const updateLectorField = (field, value) => {
+    setFormData((prev) => ({
+      ...prev,
+      lectory: {
+        ...prev.lectory,
+        [field]: value
+      }
+    }));
+  };
+
+  const updateRfidReader = (index, field, value) => {
+    setFormData((prev) => {
+      const nextReaders = [...prev.rfidReaders];
+      nextReaders[index] = {
+        ...nextReaders[index],
+        [field]: value
+      };
+      return { ...prev, rfidReaders: nextReaders };
+    });
+  };
+
+  const addRfidReader = () => {
+    setFormData((prev) => ({
+      ...prev,
+      rfidReaders: [
+        ...prev.rfidReaders,
+        { id: `RFID-${prev.rfidReaders.length + 1}`, ip: '', port: '' }
+      ]
+    }));
+  };
+
+  const removeRfidReader = (index) => {
+    setFormData((prev) => ({
+      ...prev,
+      rfidReaders: prev.rfidReaders.filter((_, idx) => idx !== index)
+    }));
+  };
+
+  const saveConfiguration = async () => {
+    setLoading(true);
+    setSaveStatus(null);
+    try {
+      const payload = {
+        mode: formData.mode,
+        tdc: {
+          cycleTimeout: Number(formData.cycleTimeout) || 5000
+        }
+      };
+
+      if (formData.mode === 'lectory') {
+        payload.lectory = {
+          lewy: formData.lectory.lewy,
+          prawy: formData.lectory.prawy,
+          [lectoryKeys.frontKey]: formData.lectory.front,
+          [lectoryKeys.backKey]: formData.lectory.back
+        };
+      } else {
+        payload.rfid = {
+          expectedTags: Number(formData.expectedTags) || 0,
+          readers: formData.rfidReaders
+            .filter((reader) => reader.ip && reader.port)
+            .map((reader, index) => ({
+              id: reader.id || `RFID-${index + 1}`,
+              ip: reader.ip,
+              port: Number(reader.port)
+            }))
+        };
+      }
+
+      const response = await fetch(`${config.API_BASE_URL}/api/configuration`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setSaveStatus({ type: 'success', message: 'Konfiguracja zapisana' });
+        await fetchConfig();
+        await fetchDigitalStatus();
+      } else {
+        setSaveStatus({
+          type: 'error',
+          message: result.error || 'Błąd zapisu konfiguracji'
+        });
+      }
+    } catch (error) {
+      console.error('Błąd zapisu konfiguracji:', error);
+      setSaveStatus({ type: 'error', message: 'Błąd zapisu konfiguracji' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const digitalStates = digitalStatus?.digitalMonitoring?.states || {};
+  const dioEntries = Object.entries(digitalStates);
+
+  return (
+    <div className="config-tab">
+      <div className="config-section">
+        <h3>Tryb pracy</h3>
+        <div className="config-actions-top">
+          <button
+            onClick={fetchConfig}
+            className="btn btn-primary"
+            disabled={loading}
+          >
+            🔄 Pobierz Konfigurację
+          </button>
+          <button
+            onClick={saveConfiguration}
+            className="btn btn-success"
+            disabled={loading || !configLoaded}
+          >
+            💾 Zapisz Konfigurację
+          </button>
+        </div>
+
+        <div className="config-grid">
+          <div className="config-group">
+            <label>Tryb:</label>
+            <select
+              value={formData.mode}
+              onChange={(e) => setFormData((prev) => ({ ...prev, mode: e.target.value }))}
+              disabled={loading}
+            >
+              <option value="lectory">Lektory</option>
+              <option value="rfid">RFID</option>
+            </select>
+          </div>
+
+          <div className="config-group">
+            <label>Timeout TDC (ms):</label>
+            <input
+              type="number"
+              value={formData.cycleTimeout}
+              onChange={(e) => setFormData((prev) => ({ ...prev, cycleTimeout: e.target.value }))}
+              min="100"
+              step="100"
+              disabled={loading}
+            />
+          </div>
+        </div>
+      </div>
+
+      {formData.mode === 'lectory' ? (
+        <div className="config-section">
+          <h3>Adresy lektorów</h3>
+          <div className="config-grid">
+            <div className="config-group">
+              <label>Lewy:</label>
+              <input
+                type="text"
+                value={formData.lectory.lewy}
+                onChange={(e) => updateLectorField('lewy', e.target.value)}
+                disabled={loading}
+              />
+            </div>
+            <div className="config-group">
+              <label>Prawy:</label>
+              <input
+                type="text"
+                value={formData.lectory.prawy}
+                onChange={(e) => updateLectorField('prawy', e.target.value)}
+                disabled={loading}
+              />
+            </div>
+            <div className="config-group">
+              <label>Przód:</label>
+              <input
+                type="text"
+                value={formData.lectory.front}
+                onChange={(e) => updateLectorField('front', e.target.value)}
+                disabled={loading}
+              />
+            </div>
+            <div className="config-group">
+              <label>Tył:</label>
+              <input
+                type="text"
+                value={formData.lectory.back}
+                onChange={(e) => updateLectorField('back', e.target.value)}
+                disabled={loading}
+              />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="config-section">
+          <h3>Urządzenia RFID</h3>
+          <div className="config-grid">
+            <div className="config-group">
+              <label>Oczekiwane tagi (good read):</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={formData.expectedTags}
+                onChange={(e) => setFormData((prev) => ({ ...prev, expectedTags: e.target.value }))}
+                disabled={loading}
+              />
+            </div>
+          </div>
+          <div className="rfid-list">
+            {formData.rfidReaders.length === 0 ? (
+              <div className="rfid-empty">Brak zdefiniowanych urządzeń RFID</div>
+            ) : (
+              formData.rfidReaders.map((reader, index) => (
+                <div key={index} className="rfid-row">
+                  <input
+                    type="text"
+                    placeholder="ID (opcjonalnie)"
+                    value={reader.id || ''}
+                    onChange={(e) => updateRfidReader(index, 'id', e.target.value)}
+                    disabled={loading}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Adres IP"
+                    value={reader.ip || ''}
+                    onChange={(e) => updateRfidReader(index, 'ip', e.target.value)}
+                    disabled={loading}
+                  />
+                  <input
+                    type="number"
+                    placeholder="Port"
+                    value={reader.port || ''}
+                    onChange={(e) => updateRfidReader(index, 'port', e.target.value)}
+                    disabled={loading}
+                  />
+                  <button
+                    className="btn btn-danger"
+                    onClick={() => removeRfidReader(index)}
+                    disabled={loading}
+                  >
+                    Usuń
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="config-actions-bottom">
+            <button
+              className="btn btn-secondary"
+              onClick={addRfidReader}
+              disabled={loading}
+            >
+              ➕ Dodaj urządzenie
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="config-section">
+        <h3>Stany cyfrowe wejść TDC</h3>
+        {dioEntries.length === 0 ? (
+          <div className="dio-empty">Brak danych o wejściach cyfrowych</div>
+        ) : (
+          <div className="dio-list">
+            {dioEntries.map(([name, state]) => (
+              <div key={name} className="dio-row">
+                <span className="dio-name">{name}</span>
+                <span className="dio-direction">IN</span>
+                <span
+                  className={`dio-state ${
+                    state === 'HIGH'
+                      ? 'state-high'
+                      : state === 'LOW'
+                      ? 'state-low'
+                      : 'state-unknown'
+                  }`}
+                >
+                  {state || 'UNKNOWN'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {saveStatus && (
+        <div className={`config-status ${saveStatus.type}`}>
+          {saveStatus.message}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const RfidView = () => {
+  const [status, setStatus] = useState(null);
+  const [expectedTags, setExpectedTags] = useState(0);
+  const [lastCycle, setLastCycle] = useState(null);
+  const [cycleReaders, setCycleReaders] = useState([]);
+
+  const fetchStatus = async () => {
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/api/rfid/status`);
+      const result = await response.json();
+      if (result) {
+        setStatus(result.status || result);
+      }
+    } catch (error) {
+      console.error('Błąd pobierania statusu RFID:', error);
+    }
+  };
+
+  const fetchExpectedTags = async () => {
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/api/configuration`);
+      const result = await response.json();
+      setExpectedTags(Number(result?.rfid?.expectedTags) || 0);
+    } catch (error) {
+      console.error('Błąd pobierania konfiguracji RFID:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchStatus();
+    fetchExpectedTags();
+    const interval = setInterval(() => {
+      fetchStatus();
+      fetchExpectedTags();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const source = new EventSource(`${config.API_BASE_URL}/api/rfid/events`);
+    source.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        setLastCycle(payload);
+        fetchStatus();
+      } catch (error) {
+        console.error('Błąd parsowania zdarzenia RFID:', error);
+      }
+    };
+    source.onerror = () => {
+      source.close();
+    };
+    return () => source.close();
+  }, []);
+
+  useEffect(() => {
+    if (lastCycle && status?.readers) {
+      setCycleReaders(status.readers);
+    }
+  }, [lastCycle, status]);
+
+  const readers = lastCycle ? cycleReaders : (status?.readers || []);
+  const cycleResults = lastCycle?.results || null;
+  const uniqueTags = new Set();
+  if (cycleResults) {
+    Object.values(cycleResults).forEach((codes) => {
+      (codes || []).forEach((tag) => {
+        if (tag && tag !== 'NoRead' && tag !== 'NORREAD') {
+          uniqueTags.add(tag);
+        }
+      });
+    });
+  }
+  const uniqueCount = uniqueTags.size;
+  const cycleCount = lastCycle?.uniqueCount ?? uniqueCount;
+  const cycleExpected = lastCycle?.expectedCount ?? expectedTags;
+  const goodRead = lastCycle
+    ? lastCycle.goodRead
+    : expectedTags > 0
+    ? uniqueCount >= expectedTags
+    : uniqueCount > 0;
+  const cycleTime = lastCycle?.timestamp
+    ? new Date(lastCycle.timestamp).toLocaleString()
+    : null;
+
+  return (
+    <div className="rfid-view">
+      <div className="rfid-header">
+        <h3>RFID - urządzenia i ostatnie tagi</h3>
+        <div className={`rfid-goodread ${goodRead ? 'good' : 'bad'}`}>
+          Good Read: {cycleCount}/{cycleExpected || 0}
+        </div>
+      </div>
+      {cycleTime && (
+        <div className="rfid-cycle-time">Ostatni cykl: {cycleTime}</div>
+      )}
+      {readers.length === 0 ? (
+        <div className="rfid-empty">Brak zdefiniowanych urządzeń RFID</div>
+      ) : (
+        <div className="rfid-cards">
+          {readers.map((reader) => {
+            const lastRead = reader.lastRead;
+            const tags = cycleResults ? (cycleResults[reader.id] || []) : [];
+            const lastTime = cycleResults ? (cycleTime || 'Brak danych') : 'Brak danych';
+
+            return (
+              <div key={reader.id} className="rfid-card">
+                <div className="rfid-card-header">
+                  <div className="rfid-card-title">{reader.id}</div>
+                  <div className="rfid-card-meta">
+                    {reader.ip}:{reader.port}
+                  </div>
+                </div>
+                <div className="rfid-tags">
+                  {tags.length === 0 ? (
+                    <span className="rfid-tag empty">Brak tagów</span>
+                  ) : (
+                    tags.map((tag, index) => (
+                      <span key={index} className="rfid-tag">
+                        {tag}
+                      </span>
+                    ))
+                  )}
+                </div>
+                <div className="rfid-last-time">Ostatni odczyt: {lastTime}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Główna aplikacja
 function App() {
   const [data, setData] = useState(null);
@@ -715,6 +1286,7 @@ function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [isIndustrial, setIsIndustrial] = useState(false);
   const [activeView, setActiveView] = useState('main');
+  const [systemMode, setSystemMode] = useState('lectory');
   const [rsSenderDetailedStatus, setRsSenderDetailedStatus] = useState(null);
   const [rsSenderMode, setRsSenderMode] = useState(null);
 
@@ -752,6 +1324,33 @@ function App() {
       console.error('Błąd pobierania trybu RS Sender:', error);
     }
   };
+
+  const fetchSystemMode = async () => {
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/api/configuration`);
+      const result = await response.json();
+      if (result?.mode) {
+        setSystemMode(result.mode);
+      }
+    } catch (error) {
+      console.error('Błąd pobierania trybu systemu:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchSystemMode();
+    const interval = setInterval(fetchSystemMode, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (systemMode === 'rfid' && activeView === 'main') {
+      setActiveView('rfid');
+    }
+    if (systemMode === 'lectory' && activeView === 'rfid') {
+      setActiveView('main');
+    }
+  }, [systemMode, activeView]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -794,6 +1393,7 @@ function App() {
     if (!results) return {};
     
     const filtered = { ...results };
+    const { frontKey, backKey } = getFrontBackKeys(filtered);
     
     const existsInSide = (value) => {
       const inLeft = filtered.lewy?.includes(value);
@@ -801,17 +1401,17 @@ function App() {
       return inLeft || inRight;
     };
     
-    if (filtered.przód && filtered.przód.length > 0) {
-      const frontValue = filtered.przód[0];
+    if (filtered[frontKey] && filtered[frontKey].length > 0) {
+      const frontValue = filtered[frontKey][0];
       if (frontValue !== "NoRead" && existsInSide(frontValue)) {
-        filtered.przód = ["NoRead"];
+        filtered[frontKey] = ["NoRead"];
       }
     }
     
-    if (filtered.tył && filtered.tył.length > 0) {
-      const backValue = filtered.tył[0];
+    if (filtered[backKey] && filtered[backKey].length > 0) {
+      const backValue = filtered[backKey][0];
       if (backValue !== "NoRead" && existsInSide(backValue)) {
-        filtered.tył = ["NoRead"];
+        filtered[backKey] = ["NoRead"];
       }
     }
     
@@ -821,8 +1421,9 @@ function App() {
   const shouldShow6Tiles = (filteredResults) => {
     if (!filteredResults) return false;
     
-    const przod = filteredResults.przód || [];
-    const tyl = filteredResults.tył || [];
+    const { frontKey, backKey } = getFrontBackKeys(filteredResults);
+    const przod = filteredResults[frontKey] || [];
+    const tyl = filteredResults[backKey] || [];
     
     const przodHasData = przod.length > 0 && przod.some(value => value !== "NoRead");
     const tylHasData = tyl.length > 0 && tyl.some(value => value !== "NoRead");
@@ -935,11 +1536,12 @@ function App() {
 
     const filteredResults = filterResults(data.results);
     const show6Tiles = shouldShow6Tiles(filteredResults);
+    const { frontKey, backKey } = getFrontBackKeys(filteredResults);
     
     const lewyValues = ensureTwoValues(filteredResults.lewy);
     const prawyValues = ensureTwoValues(filteredResults.prawy);
-    const przodValues = filteredResults.przód || [];
-    const tylValues = filteredResults.tył || [];
+    const przodValues = filteredResults[frontKey] || [];
+    const tylValues = filteredResults[backKey] || [];
 
     return (
       <div className="main-view-container">
@@ -983,13 +1585,28 @@ function App() {
           />
           
           <div className="view-switcher">
-            <button 
-              className={`view-btn ${activeView === 'main' ? 'active' : ''}`}
-              onClick={() => setActiveView('main')}
+            {systemMode === 'rfid' ? (
+              <button
+                className={`view-btn ${activeView === 'rfid' ? 'active' : ''}`}
+                onClick={() => setActiveView('rfid')}
+              >
+                RFID
+              </button>
+            ) : (
+              <button
+                className={`view-btn ${activeView === 'main' ? 'active' : ''}`}
+                onClick={() => setActiveView('main')}
+              >
+                Lektory
+              </button>
+            )}
+            <button
+              className={`view-btn ${activeView === 'config' ? 'active' : ''}`}
+              onClick={() => setActiveView('config')}
             >
-              Lektory
+              Konfiguracja
             </button>
-            <button 
+            <button
               className={`view-btn ${activeView === 'rs' ? 'active' : ''}`}
               onClick={() => setActiveView('rs')}
             >
@@ -1017,9 +1634,12 @@ function App() {
       </div>
 
       {activeView === 'main' && <MainView />}
+      {activeView === 'rfid' && <RfidView />}
+      {activeView === 'config' && <SystemConfigTab systemMode={systemMode} />}
       {activeView === 'rs' && <RSConfigTab />}
     </div>
   );
 }
 
 export default App;
+

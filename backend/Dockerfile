@@ -1,5 +1,8 @@
 # Backend: Node.js
-FROM node:18-alpine as build
+FROM node:20-alpine AS build
+
+# Narzędzia do node-gyp (np. diskusage)
+RUN apk add --no-cache python3 make g++
 
 # Utwórz katalog roboczy
 WORKDIR /app

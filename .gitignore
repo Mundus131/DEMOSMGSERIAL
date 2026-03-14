@@ -1,3 +1,4 @@
 # Ignore local data and tdc directories
 /data/
 /tdc/
+*.tar

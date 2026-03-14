@@ -9,11 +9,12 @@ class RSSender extends EventEmitter {
     this.currentQueue = [];
     this.retryCounts = {};
     this.maxRetries = 3;
-    this.responseTimeout = 1000; // 1 sekunda
+    this.responseTimeout = 1000; // 1 sekunda (domyślnie)
     this.timeoutTimer = null;
     this.currentCode = null;
     this.isWaitingForResponse = false;
     this.responseHandlers = new Map();
+    this.senderMode = 'separate'; // separate | combined
   }
 
   /**
@@ -44,23 +45,36 @@ class RSSender extends EventEmitter {
         throw new Error('Port RS nie jest otwarty');
       }
 
-      // Wyślij kody jeden po drugim
-      for (let i = 0; i < this.currentQueue.length; i++) {
-        const code = this.currentQueue[i];
-        const sendResult = await this.sendSingleCode(code);
-        
+            if (this.senderMode === 'combined') {
+        const combined = this.currentQueue.join(';');
+        const sendResult = await this.sendSingleCode(combined);
         results.details.push(sendResult);
-        
         if (sendResult.success) {
-          results.sent++;
-          await logState(`[RS SENDER] Kod wysłany pomyślnie: ${code}`);
+          results.sent = this.currentQueue.length;
+          await logState(`[RS SENDER] Kody wys?ane pomy?lnie (combined): ${combined}`);
         } else {
-          results.failed++;
-          await logState(`[RS SENDER] Błąd wysyłki kodu: ${code} - ${sendResult.error}`);
+          results.failed = this.currentQueue.length;
+          await logState(`[RS SENDER] B??d wysy?ki (combined): ${sendResult.error}`);
         }
+      } else {
+        // Wy?lij kody jeden po drugim
+        for (let i = 0; i < this.currentQueue.length; i++) {
+          const code = this.currentQueue[i];
+          const sendResult = await this.sendSingleCode(code);
+          
+          results.details.push(sendResult);
+          
+          if (sendResult.success) {
+            results.sent++;
+            await logState(`[RS SENDER] Kod wys?any pomy?lnie: ${code}`);
+          } else {
+            results.failed++;
+            await logState(`[RS SENDER] B??d wysy?ki kodu: ${code} - ${sendResult.error}`);
+          }
 
-        // Małe opóźnienie między kodami
-        await new Promise(resolve => setTimeout(resolve, 50));
+          // Ma?e op??nienie mi?dzy kodami
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
       }
 
       await logState(`[RS SENDER] Zakończono wysyłkę: ${results.sent}/${codes.length} sukcesów`);
@@ -106,6 +120,8 @@ class RSSender extends EventEmitter {
       } catch (error) {
         this.retryCounts[code]++;
         await logState(`[RS SENDER] Błąd podczas wysyłki ${code}: ${error.message}`);
+        // odczekaj pełny timeout przed kolejną próbą
+        await new Promise(resolve => setTimeout(resolve, this.responseTimeout));
       }
     }
 
@@ -124,9 +140,11 @@ class RSSender extends EventEmitter {
     return new Promise(async (resolve, reject) => {
       this.currentCode = code;
       this.isWaitingForResponse = true;
+      let responseBuffer = '';
 
       // Przygotuj ramkę do wysłania
       const frame = `\x02${code}\x03`; // <STX>KOD<ETX>
+      await logState(`[RS SENDER] Oczekiwanie na odpowiedź (OK/NG) dla ${code}`);
       
       // Unikalny ID dla tego żądania
       const requestId = Date.now() + Math.random();
@@ -135,21 +153,57 @@ class RSSender extends EventEmitter {
       const responseHandler = (data) => {
         if (!this.isWaitingForResponse) return;
 
-        const response = data.data || data;
-        const responseString = typeof response === 'string' ? response : response.toString();
+        let responseString = '';
+
+        if (data && typeof data === 'object') {
+          // Obsługa zdarzeń z rs.notifySseClients
+          if (data.type && data.type !== 'raw_frame' && data.type !== 'parsed_frame') {
+            return;
+          }
+          if (typeof data.data !== 'string') {
+            return;
+          }
+          responseString = data.data;
+        } else if (typeof data === 'string') {
+          responseString = data;
+        } else {
+          return;
+        }
+
+        if (responseString.startsWith('data:')) {
+          responseString = responseString.replace(/^data:\s*/i, '').trim();
+        }
         
         console.log(`[RS SENDER] Odebrana odpowiedź: ${responseString}`);
         
-        // Sprawdź czy to odpowiedź na nasze żądanie
-        if (responseString.includes('\x02OK\x03')) {
+        // Sprawdź czy to odpowiedź na nasze żądanie (z buforowaniem)
+        responseBuffer = (responseBuffer + responseString).replace(/\s+/g, '');
+        if (responseBuffer.length > 200) {
+          responseBuffer = responseBuffer.slice(-200);
+        }
+
+        const normalized = responseBuffer;
+        const okPatterns = [
+          '\x02OK\x03', '\x02OK', 'OK\x03', 'OK'
+        ];
+        const ngPatterns = [
+          '\x02NG\x03', '\x02NG', 'NG\x03', 'NG'
+        ];
+
+        const hasOk = okPatterns.some(pattern => normalized.includes(pattern));
+        const hasNg = ngPatterns.some(pattern => normalized.includes(pattern));
+
+        if (hasOk) {
           this.clearResponseHandler(requestId);
           this.clearTimeout();
           this.isWaitingForResponse = false;
+          rs.removeSseClient(sseClient);
           resolve({ success: true, response: 'OK' });
-        } else if (responseString.includes('\x02NG\x03')) {
+        } else if (hasNg) {
           this.clearResponseHandler(requestId);
           this.clearTimeout();
           this.isWaitingForResponse = false;
+          rs.removeSseClient(sseClient);
           resolve({ success: false, response: 'NG' });
         }
       };
@@ -161,11 +215,11 @@ class RSSender extends EventEmitter {
       const sseClient = {
         write: (data) => {
           try {
-            const jsonStr = data.replace('data: ', '');
-            const parsed = JSON.parse(jsonStr);
+            const cleaned = data.toString().replace(/^data:\s*/i, '').trim();
+            const parsed = JSON.parse(cleaned);
             responseHandler(parsed);
           } catch (e) {
-            responseHandler({ data: data });
+            responseHandler(data.toString());
           }
         }
       };
@@ -238,7 +292,8 @@ class RSSender extends EventEmitter {
       queueLength: this.currentQueue.length,
       currentCode: this.currentCode,
       isWaitingForResponse: this.isWaitingForResponse,
-      retryCounts: this.retryCounts
+      retryCounts: this.retryCounts,
+      mode: this.senderMode
     };
   }
 
@@ -252,6 +307,7 @@ class RSSender extends EventEmitter {
       queueLength: this.currentQueue.length,
       currentCode: this.currentCode,
       isWaitingForResponse: this.isWaitingForResponse,
+      mode: this.senderMode,
       progress: this.currentQueue.length > 0 ? {
         total: this.currentQueue.length + Object.keys(this.retryCounts).length,
         processed: Object.keys(this.retryCounts).length,
@@ -273,6 +329,30 @@ class RSSender extends EventEmitter {
       this.clearAllResponseHandlers();
       logState('[RS SENDER] Wysyłka przerwana przez użytkownika');
     }
+  }
+
+  setResponseTimeout(ms) {
+    const value = Number(ms);
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error('Nieprawidłowy timeout odpowiedzi');
+    }
+    this.responseTimeout = Math.round(value);
+  }
+
+  getResponseTimeout() {
+    return this.responseTimeout;
+  }
+
+  setMode(mode) {
+    const normalized = (mode || '').toLowerCase();
+    if (!['separate', 'combined'].includes(normalized)) {
+      throw new Error('Nieobs?ugiwany tryb wysy?ki');
+    }
+    this.senderMode = normalized;
+  }
+
+  getMode() {
+    return this.senderMode;
   }
 }
 

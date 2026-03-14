@@ -263,23 +263,29 @@ function sendData(data) {
 
   // Dodaj znak nowej linii jeśli nie ma
   const dataToSend = data.endsWith('\n') ? data : data + '\n';
+  let writeScheduled = true;
   
-  serialPort.write(dataToSend, (err) => {
-    if (err) {
-      console.error('❌ [SERIAL] Błąd wysyłania danych:', err.message);
-      return false;
-    }
-    console.log('✅ [SERIAL] Dane wysłane pomyślnie:', data);
-    
-    // Powiadom SSE o wysłanych danych
-    notifySseClients({
-      sent: data,
-      timestamp: new Date().toISOString(),
-      type: 'sent'
+  try {
+    serialPort.write(dataToSend, (err) => {
+      if (err) {
+        console.error('❌ [SERIAL] Błąd wysyłania danych:', err.message);
+        return;
+      }
+      console.log('✅ [SERIAL] Dane wysłane pomyślnie:', data);
+      
+      // Powiadom SSE o wysłanych danych
+      notifySseClients({
+        sent: data,
+        timestamp: new Date().toISOString(),
+        type: 'sent'
+      });
     });
-    
-    return true;
-  });
+  } catch (error) {
+    console.error('❌ [SERIAL] Błąd inicjalizacji wysyłki:', error.message);
+    writeScheduled = false;
+  }
+
+  return writeScheduled;
 }
 
 function readData() {
