@@ -1,20 +1,18 @@
 {
-  "timestamp": "2025-09-03T08:43:45.749Z",
+  "timestamp": "2025-12-15T13:05:44.451Z",
   "success": true,
   "results": {
-    "przód": [
-      "1516"
-    ],
-    "prawy": [
-      "1112",
-      "8910"
-    ],
     "tył": [
       "NoRead"
     ],
     "lewy": [
-      "4567",
-      "1234"
+      "NoRead"
+    ],
+    "prawy": [
+      "NoRead"
+    ],
+    "przód": [
+      "NoRead"
     ]
   }
 }

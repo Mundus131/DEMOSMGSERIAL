@@ -242,6 +242,25 @@ class RSSender extends EventEmitter {
     };
   }
 
+
+  /**
+ * Zwraca szczegółowy status wysyłki
+ */
+  getSendStatus() {
+    return {
+      isSending: this.isSending,
+      queueLength: this.currentQueue.length,
+      currentCode: this.currentCode,
+      isWaitingForResponse: this.isWaitingForResponse,
+      progress: this.currentQueue.length > 0 ? {
+        total: this.currentQueue.length + Object.keys(this.retryCounts).length,
+        processed: Object.keys(this.retryCounts).length,
+        percentage: Math.round((Object.keys(this.retryCounts).length / 
+          (this.currentQueue.length + Object.keys(this.retryCounts).length)) * 100) || 0
+      } : null,
+      timestamp: new Date().toISOString()
+    };
+  }
   /**
    * Przerywa aktualną wysyłkę
    */

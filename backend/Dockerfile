@@ -1,5 +1,5 @@
 # Backend: Node.js
-FROM node:18
+FROM node:18-alpine as build
 
 # Utwórz katalog roboczy
 WORKDIR /app

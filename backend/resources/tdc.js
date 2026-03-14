@@ -11,6 +11,201 @@ const path = require('path');
 console.log(config.lectory)
 const lectorController = new MultiLectorController(config.lectory, 2112);
 
+function countValidCodes(results) {
+  const { przód, tył, lewy, prawy } = results;
+  let count = 0;
+  
+  // Zlicz lewy bok
+  for (const code of lewy) {
+    if (code && code !== 'NoRead' && code !== 'NORREAD') {
+      count++;
+    }
+  }
+  
+  // Zlicz prawy bok
+  for (const code of prawy) {
+    if (code && code !== 'NoRead' && code !== 'NORREAD') {
+      count++;
+    }
+  }
+  
+  // Zlicz przód (jeśli nie jest NoRead)
+  if (przód.length > 0 && przód[0] !== 'NoRead' && przód[0] !== 'NORREAD') {
+    count++;
+  }
+  
+  // Zlicz tył (jeśli nie jest NoRead)
+  if (tył.length > 0 && tył[0] !== 'NoRead' && tył[0] !== 'NORREAD') {
+    count++;
+  }
+  
+  return count;
+}
+
+function analyzeScenarioWithDuplicates(results) {
+  const { przód, tył, lewy, prawy } = results;
+  const validCodesCount = countValidCodes(results);
+  
+  // Znajdź wszystkie kody z lewego i prawego
+  const leftValidCodes = lewy.filter(code => code && code !== 'NoRead' && code !== 'NORREAD');
+  const rightValidCodes = prawy.filter(code => code && code !== 'NoRead' && code !== 'NORREAD');
+  const sideCodes = [...leftValidCodes, ...rightValidCodes];
+  
+  // Sprawdź duplikaty w przodzie
+  const przodValidCodes = przód.filter(code => code && code !== 'NoRead' && code !== 'NORREAD');
+  const przodDuplicates = przodValidCodes.filter(code => sideCodes.includes(code));
+  
+  // Sprawdź duplikaty w tyle
+  const tylValidCodes = tył.filter(code => code && code !== 'NoRead' && code !== 'NORREAD');
+  const tylDuplicates = tylValidCodes.filter(code => sideCodes.includes(code));
+  
+  const hasDuplicates = przodDuplicates.length > 0 || tylDuplicates.length > 0;
+  
+  // Zlicz unikalne kody
+  const allCodes = [...lewy, ...prawy, ...przód, ...tył];
+  const uniqueCodes = [...new Set(allCodes.filter(code => 
+    code && code !== 'NoRead' && code !== 'NORREAD'
+  ))];
+  
+  // Określ typ scenariusza
+  let scenarioType = null;
+  let isValid = false;
+  
+  // Scenariusz 1: 4-kodowy (lewy/prawy po 2, przód/tył = NoRead)
+  if (lewy.length === 2 && prawy.length === 2 &&
+      przód[0] === 'NoRead' && tył[0] === 'NoRead') {
+    scenarioType = 'scenario1';
+    isValid = validCodesCount === 4;
+  }
+  // Scenariusz 2: 6-kodowy (lewy/prawy po 2, przód/tył po jednym poprawnym)
+  else if (lewy.length === 2 && prawy.length === 2 &&
+           przód.length === 1 && przód[0] !== 'NoRead' &&
+           tył.length === 1 && tył[0] !== 'NoRead') {
+    scenarioType = 'scenario2';
+    isValid = validCodesCount === 6;
+  }
+  // Mieszany scenariusz - jakiekolwiek duplikaty
+  else if (lewy.length === 2 && prawy.length === 2 && hasDuplicates) {
+    scenarioType = 'mixed_4code';
+    // Jeśli mamy 4 unikalne kody, to OK (nawet jeśli przód/tył mają duplikaty)
+    const uniqueSideCodes = new Set([...leftValidCodes, ...rightValidCodes]);
+    isValid = uniqueSideCodes.size === 4;
+  }
+  
+  return {
+    scenarioType,
+    isValid,
+    validCodesCount,
+    uniqueCodesCount: uniqueCodes.length,
+    expectedCount: scenarioType === 'scenario1' || scenarioType === 'mixed_4code' ? 4 : 
+                   scenarioType === 'scenario2' ? 6 : 0,
+    hasDuplicates,
+    duplicates: {
+      przod: przodDuplicates,
+      tyl: tylDuplicates,
+      total: przodDuplicates.length + tylDuplicates.length
+    },
+    codesSummary: {
+      left: leftValidCodes,
+      right: rightValidCodes,
+      front: przodValidCodes,
+      back: tylValidCodes
+    }
+  };
+}
+
+
+
+function extractCodesForScenario(results, scenarioAnalysis) {
+  const codes = [];
+  const seenCodes = new Set();
+  
+  // Zawsze sprawdzaj duplikaty z lewego i prawego
+  const leftCodes = results.lewy || [];
+  const rightCodes = results.prawy || [];
+  const frontCodes = results.przód || [];
+  const backCodes = results.tył || [];
+  
+  // Najpierw dodaj lewy bok (pełna kontrola)
+  for (const code of leftCodes) {
+    if (code && code !== 'NoRead' && code !== 'NORREAD' && !seenCodes.has(code)) {
+      codes.push(code);
+      seenCodes.add(code);
+      console.log(`[TDC] Dodano kod ${code} z lewy`);
+    }
+  }
+  
+  // Potem prawy bok
+  for (const code of rightCodes) {
+    if (code && code !== 'NoRead' && code !== 'NORREAD' && !seenCodes.has(code)) {
+      codes.push(code);
+      seenCodes.add(code);
+      console.log(`[TDC] Dodano kod ${code} z prawy`);
+    }
+  }
+  
+  // PRZÓD - sprawdzaj czy kod jest już w lewym/prawym
+  for (const code of frontCodes) {
+    if (code && code !== 'NoRead' && code !== 'NORREAD') {
+      if (!seenCodes.has(code)) {
+        codes.push(code);
+        seenCodes.add(code);
+        console.log(`[TDC] Dodano kod ${code} z przód`);
+      } else {
+        console.log(`[TDC] Pominięto duplikat ${code} z przód (już w lewym/prawym)`);
+      }
+    }
+  }
+  
+  // TYŁ - sprawdzaj czy kod jest już w lewym/prawym
+  for (const code of backCodes) {
+    if (code && code !== 'NoRead' && code !== 'NORREAD') {
+      if (!seenCodes.has(code)) {
+        codes.push(code);
+        seenCodes.add(code);
+        console.log(`[TDC] Dodano kod ${code} z tył`);
+      } else {
+        console.log(`[TDC] Pominięto duplikat ${code} z tył (już w lewym/prawym/przód)`);
+      }
+    }
+  }
+  
+  console.log(`[TDC] Wyekstrahowano ${codes.length} unikalnych kodów do wysłania: ${codes}`);
+  return codes;
+}
+
+
+// Ulepszona funkcja checkScenario zwracająca szczegóły
+function analyzeScenario(results) {
+  const { przód, tył, lewy, prawy } = results;
+  const validCodesCount = countValidCodes(results);
+  
+  // Określ typ scenariusza
+  let scenarioType = null;
+  let isValid = false;
+  
+  // Scenariusz 1: 4-kodowy (lewy/prawy po 2, przód/tył = NoRead)
+  if (lewy.length === 2 && prawy.length === 2 &&
+      przód[0] === 'NoRead' && tył[0] === 'NoRead') {
+    scenarioType = 'scenario1'; // 4-kodowy
+    isValid = validCodesCount === 4;
+  }
+  // Scenariusz 2: 6-kodowy (lewy/prawy po 2, przód/tył po jednym poprawnym)
+  else if (lewy.length === 2 && prawy.length === 2 &&
+           przód.length === 1 && przód[0] !== 'NoRead' &&
+           tył.length === 1 && tył[0] !== 'NoRead') {
+    scenarioType = 'scenario2'; // 6-kodowy
+    isValid = validCodesCount === 6;
+  }
+  
+  return {
+    scenarioType,
+    isValid,
+    validCodesCount,
+    expectedCount: scenarioType === 'scenario1' ? 4 : scenarioType === 'scenario2' ? 6 : 0
+  };
+}
+
 function checkScenario(data) {
   const { przód, tył, lewy, prawy } = data;
 
@@ -30,21 +225,66 @@ function checkScenario(data) {
   return false;
 }
 
+async function setDigitalOutputsForAnalysis(analysis) {
+  const { scenarioType, isValid, validCodesCount } = analysis;
+  
+  // Ustaw kierunki dla wszystkich wyjść
+  const outputPins = ['DIO_A', 'DIO_B', 'DIO_C', 'DIO_D'];
+  for (const pin of outputPins) {
+    digitalIOManager.setDirection(pin, "OUT");
+  }
+  
+  // DIO_A - wszystkie kody odczytane poprawnie (4 lub 6)
+  await digitalIOManager.write("DIO_A", isValid ? "HIGH" : "LOW");
+  
+  // DIO_B - niepełny odczyt (0-3 lub 5 kodów)
+  const isIncomplete = !isValid && validCodesCount > 0 && 
+                       ((scenarioType === 'scenario1' && validCodesCount < 4) ||
+                        (scenarioType === 'scenario2' && validCodesCount < 6));
+  await digitalIOManager.write("DIO_B", isIncomplete ? "HIGH" : "LOW");
+  
+  // DIO_C - wariant 4-kodowy (scenariusz 1)
+  await digitalIOManager.write("DIO_C", scenarioType === 'scenario1' ? "HIGH" : "LOW");
+  
+  // DIO_D - wariant 6-kodowy (scenariusz 2)
+  await digitalIOManager.write("DIO_D", scenarioType === 'scenario2' ? "HIGH" : "LOW");
+  
+  console.log(`[TDC] Ustawione wyjścia:`);
+  console.log(`  DIO_A (kompletny): ${isValid ? 'HIGH' : 'LOW'}`);
+  console.log(`  DIO_B (niepełny): ${isIncomplete ? 'HIGH' : 'LOW'}`);
+  console.log(`  DIO_C (4-kodowy): ${scenarioType === 'scenario1' ? 'HIGH' : 'LOW'}`);
+  console.log(`  DIO_D (6-kodowy): ${scenarioType === 'scenario2' ? 'HIGH' : 'LOW'}`);
+  console.log(`  Odczytanych kodów: ${validCodesCount}/${analysis.expectedCount || '?'}`);
+}
+
+
 // Funkcja pomocnicza do ekstrakcji kodów z wyników
 function extractCodesFromResults(results) {
   const codes = [];
+  const seenCodes = new Set(); // Do śledzenia duplikatów
   
-  for (const [lectorName, lectorCodes] of Object.entries(results)) {
-    if (Array.isArray(lectorCodes)) {
-      for (const code of lectorCodes) {
+  // Definiujemy priorytet lektorów (w kolejności od najważniejszych)
+  const lectorPriority = ['lewy', 'prawy', 'przód', 'tył'];
+  
+  // Najpierw zbierz wszystkie kody z zachowaniem priorytetu
+  for (const lectorName of lectorPriority) {
+    if (results[lectorName] && Array.isArray(results[lectorName])) {
+      for (const code of results[lectorName]) {
         if (code && code !== 'NoRead' && code !== 'NORREAD') {
-          codes.push(code);
+          // Jeśli kod nie został jeszcze dodany, dodaj go
+          if (!seenCodes.has(code)) {
+            codes.push(code);
+            seenCodes.add(code);
+            console.log(`[TDC] Dodano kod ${code} z ${lectorName}`);
+          } else {
+            console.log(`[TDC] Pominięto duplikat ${code} z ${lectorName} (już odczytany wcześniej)`);
+          }
         }
       }
     }
   }
   
-  console.log(`[TDC] Wyekstrahowano kody do wysłania: ${codes}`);
+  console.log(`[TDC] Wyekstrahowano unikalne kody do wysłania: ${codes}`);
   return codes;
 }
 
@@ -80,37 +320,74 @@ const resultsFile = path.join(__dirname, 'results.json');
 
 // event po zakończeniu cyklu
 lectorController.on('cycleCompleted', async ({ success, results }) => {
-  console.log('===> Wyniki cyklu:', success, results);
-  var state = checkScenario(results)
-  console.log("Stan działania: "+state)
-  digitalIOManager.setDirection("DIO_A","OUT")
-  digitalIOManager.setDirection("DIO_B","OUT")
+  console.log('===> Wyniki cyklu:', JSON.stringify(results, null, 2));
   
-  if(state == true){
-    digitalIOManager.write("DIO_A","HIGH")
-    digitalIOManager.write("DIO_B","LOW")
-    
-    // DODANE: Wysyłanie kodów przez RS po pomyślnym scenariuszu
+  // Analizuj scenariusz z wykrywaniem duplikatów
+  const analysis = analyzeScenarioWithDuplicates(results);
+  console.log(`[TDC] Analiza:`);
+  console.log(`  Typ scenariusza: ${analysis.scenarioType || 'brak'}`);
+  console.log(`  Poprawny: ${analysis.isValid}`);
+  console.log(`  Odczytanych kodów: ${analysis.validCodesCount}/${analysis.expectedCount || 'N/A'}`);
+  if (analysis.hasDuplicates) {
+    console.log(`  Duplikaty: przód=${analysis.duplicates.przod}, tył=${analysis.duplicates.tyl}`);
+  }
+  
+  // Ustaw wyjścia cyfrowe
+  await setDigitalOutputsForAnalysis(analysis);
+  
+  // Wysyłka RS jeśli jest przynajmniej 1 kod
+  if (analysis.validCodesCount > 0) {
     try {
-      const codesToSend = extractCodesFromResults(results);
+      const codesToSend = extractCodesForScenario(results, analysis);
+      
       if (codesToSend.length > 0) {
-        console.log(`[TDC] Rozpoczynanie wysyłki ${codesToSend.length} kodów przez RS`);
+        // Określ typ wysyłki
+        let sendType = '';
+        if (analysis.scenarioType && analysis.isValid) {
+          sendType = `scenariusz ${analysis.scenarioType}`;
+        } else if (analysis.validCodesCount === 1) {
+          sendType = 'pojedynczy kod';
+        } else if (analysis.validCodesCount >= 2 && analysis.validCodesCount <= 3) {
+          sendType = `częściowy odczyt (${analysis.validCodesCount} kody)`;
+        } else if (analysis.validCodesCount === 5) {
+          sendType = `5 kodów (prawie komplet)`;
+        }
+        
+        console.log(`[TDC] Rozpoczynanie wysyłki ${codesToSend.length} kodów przez RS (${sendType})`);
+        
+        // Dodaj informację o duplikatach do logowania
+        if (analysis.hasDuplicates) {
+          await logState(`[TDC] Wykryto duplikaty: przód=${analysis.duplicates.przod}, tył=${analysis.duplicates.tyl}`);
+        }
+        
+        await logState(`[TDC] Wysyłam ${codesToSend.length} kodów: ${codesToSend.join(', ')}`);
+        
         const sendResult = await rsSender.sendCodes(codesToSend);
         console.log('[TDC] Wynik wysyłki RS:', sendResult);
         
-        // Zapis wyniku wysyłki
-        await saveRSSendResult(sendResult, results);
+        // Zapis wyniku wysyłki z informacją o duplikatach
+        const enhancedSendResult = {
+          ...sendResult,
+          scenarioType: analysis.scenarioType || 'partial_read',
+          partialRead: !analysis.scenarioType || !analysis.isValid,
+          validCodesCount: analysis.validCodesCount,
+          hasDuplicates: analysis.hasDuplicates,
+          duplicates: analysis.duplicates,
+          codesSent: codesToSend
+        };
+        
+        await saveRSSendResult(enhancedSendResult, results);
       } else {
-        console.log('[TDC] Brak kodów do wysłania przez RS');
+        console.log(`[TDC] Brak kodów do wysłania przez RS`);
+        await logState('[TDC] Brak kodów do wysłania przez RS');
       }
     } catch (error) {
       console.error('[TDC] Błąd wysyłki RS:', error);
       await logState(`[TDC] Błąd wysyłki RS: ${error.message}`);
     }
-    
   } else {
-    digitalIOManager.write("DIO_A","LOW")
-    digitalIOManager.write("DIO_B","HIGH")
+    console.log(`[TDC] Nie wysyłam RS - brak kodów`);
+    await logState(`[TDC] Nie wysyłam RS - brak kodów`);
   }
 });
 
@@ -491,6 +768,70 @@ finishCycle() {
       }
     });
 
+    app.get('/api/tdc/results/history', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+    const historyFile = path.join(__dirname, 'results_history.json');
+    
+    if (!fs.existsSync(historyFile)) {
+      return res.json({ success: true, history: [], total: 0 });
+    }
+    
+    const data = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
+    
+    // Ogranicz do żądanej liczby
+    const limitedData = data.slice(0, limit);
+    
+    res.json({
+      success: true,
+      history: limitedData,
+      total: data.length,
+      hasDuplicates: limitedData.some(item => item.analysis?.hasDuplicates)
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Endpoint do statystyk duplikatów
+app.get('/api/tdc/stats/duplicates', (req, res) => {
+  try {
+    const historyFile = path.join(__dirname, 'results_history.json');
+    
+    if (!fs.existsSync(historyFile)) {
+      return res.json({ 
+        success: true, 
+        stats: { 
+          totalCycles: 0, 
+          cyclesWithDuplicates: 0, 
+          duplicateRate: 0 
+        } 
+      });
+    }
+    
+    const data = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
+    const cyclesWithDuplicates = data.filter(item => 
+      item.analysis?.hasDuplicates
+    ).length;
+    
+    res.json({
+      success: true,
+      stats: {
+        totalCycles: data.length,
+        cyclesWithDuplicates: cyclesWithDuplicates,
+        duplicateRate: data.length > 0 ? 
+          Math.round((cyclesWithDuplicates / data.length) * 100) : 0,
+        last24Hours: data.filter(item => {
+          const dayAgo = Date.now() - (24 * 60 * 60 * 1000);
+          return new Date(item.timestamp).getTime() > dayAgo;
+        }).length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
     app.get('/api/results', (req, res) => {
       if (!fs.existsSync(resultsFile)) {
         return res.status(404).json({ error: 'Plik results.json nie istnieje' });
@@ -510,6 +851,74 @@ finishCycle() {
       res.json(rsSender.getStatus());
     });
 
+    app.get('/api/tdc/rs-sender/status/detailed', (req, res) => {
+  try {
+    const status = rsSender.getSendStatus();
+    res.json({
+      success: true,
+      status: status,
+      isActive: status.isSending || status.isWaitingForResponse,
+      message: status.isSending ? 'Wysyłka w toku' : 
+               status.isWaitingForResponse ? 'Oczekiwanie na odpowiedź' : 
+               'Wysyłka nieaktywna'
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Prostszy endpoint tylko dla UI - czy wysyłka jest aktywna
+app.get('/api/tdc/rs-sender/active', (req, res) => {
+  try {
+    const status = rsSender.getSendStatus();
+    const isActive = status.isSending || status.isWaitingForResponse;
+    
+    res.json({
+      success: true,
+      isActive: isActive,
+      status: isActive ? 'active' : 'idle',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Endpoint do pobrania historii wysyłek
+app.get('/api/tdc/rs-sender/history', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const resultsFile = path.join(__dirname, 'rs_send_results.json');
+    
+    if (!fs.existsSync(resultsFile)) {
+      return res.json([]);
+    }
+    
+    const data = JSON.parse(fs.readFileSync(resultsFile, 'utf8'));
+    // Najnowsze na początku
+    data.reverse();
+    
+    // Ogranicz liczbę wyników
+    const limitedData = data.slice(0, limit);
+    
+    res.json({
+      success: true,
+      history: limitedData,
+      total: data.length
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
     app.post('/api/tdc/rs-sender/send-codes', async (req, res) => {
       try {
         const { codes } = req.body;
