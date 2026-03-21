@@ -77,7 +77,12 @@ jobs:
 
   windows:
     name: Windows Images
-    runs-on: windows-2022
+    if: vars.ENABLE_WINDOWS_BUILDS == 'true'
+    runs-on:
+      - self-hosted
+      - windows
+      - x64
+      - docker-windows
     strategy:
       fail-fast: false
       matrix:

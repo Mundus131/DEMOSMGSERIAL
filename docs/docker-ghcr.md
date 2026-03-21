@@ -28,6 +28,22 @@ Workflow w [docker-ghcr.yml](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/.github/workflo
 - pushu tagu `v*`
 - ręcznym `workflow_dispatch`
 
+## Windows buildy
+
+Windows buildy nie sa uruchamiane na zwyklym GitHub-hosted runnerze. W workflow sa celowo przepiete na self-hosted runner Windows z Dockerem dla Windows containers.
+
+Wymagania:
+
+- self-hosted runner z labelami:
+  - `self-hosted`
+  - `windows`
+  - `x64`
+  - `docker-windows`
+- wlaczona zmienna repozytorium `ENABLE_WINDOWS_BUILDS=true`
+- aktywny Docker daemon dla Windows containers
+
+Bez tego job Windows nie wystartuje, co jest zamierzone i bezpieczniejsze niz czerwony pipeline na GitHub-hosted runnerze bez `docker_engine`.
+
 ## Jak przygotować repo na GitHubie
 
 1. Wypchnij branch i pliki workflow do zdalnego repo.

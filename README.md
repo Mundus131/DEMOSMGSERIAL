@@ -127,6 +127,17 @@ Windows:
 
 - `windows/amd64`
 
+Wazne:
+
+- Linuxowe buildy dzialaja na GitHub-hosted runnerach
+- Windowsowe buildy sa ustawione jako opcjonalne i wymagaja self-hosted runnera z labelami:
+  - `self-hosted`
+  - `windows`
+  - `x64`
+  - `docker-windows`
+- dodatkowo w repo trzeba ustawic zmienna `ENABLE_WINDOWS_BUILDS=true`
+- runner musi miec dzialajacy Docker daemon dla Windows containers
+
 ## Jak uruchomic pierwszy pipeline
 
 1. Wypchnij branch `refactor` do zdalnego repo.
