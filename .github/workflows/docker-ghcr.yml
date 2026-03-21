@@ -106,12 +106,12 @@ jobs:
           $repo = "${{ env.IMAGE_PREFIX }}".ToLowerInvariant()
           $refName = "${{ github.ref_name }}".ToLowerInvariant().Replace('/', '-')
           $image = "${{ env.REGISTRY }}/$owner/$repo-${{ matrix.component }}-windows"
-          $shaTag = "$image:sha-${{ github.sha }}"
-          $refTag = "$image:$refName"
+          $shaTag = "${image}:sha-${{ github.sha }}"
+          $refTag = "${image}:$refName"
           $tags = @($shaTag, $refTag)
 
           if ("${{ github.ref_name }}" -eq "${{ github.event.repository.default_branch }}") {
-            $tags += "$image:latest"
+            $tags += "${image}:latest"
           }
 
           foreach ($tag in $tags) {
