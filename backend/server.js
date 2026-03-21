@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs').promises;
+const net = require('net');
+const ping = require('ping');
 const configWatcher = require('./resources/configWatcher');
 const systemStats = require('./resources/systemStats');
 const utils = require('./resources/utils');
@@ -14,9 +16,13 @@ const logs = require('./resources/logs');
 const configuration = require('./resources/configuration');
 const rs = require('./resources/rs'); // DODANE
 const rsSender = require('./resources/rsSender'); // DODANE
+const loadSession = require('./resources/loadSession');
+const cdf = require('./resources/cdfa');
+const { ASSETS_ROOT, captureImagesForSummary } = require('./resources/ftpArchive');
 
 const app = express();
 const PORT = process.env.PORT || 5010;
+const sseClients = new Set();
 
 const CLEANER_CONFIG = {
   maxEntries: {
@@ -42,6 +48,17 @@ app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
+
+function publishEvent(type, payload) {
+  const message = `data: ${JSON.stringify({ type, payload, timestamp: new Date().toISOString() })}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(message);
+    } catch (error) {
+      sseClients.delete(client);
+    }
+  }
+}
 
 async function initialize() {
   try {
@@ -85,6 +102,8 @@ async function initialize() {
 }
 
 function setupRoutes() {
+  app.use('/api/load-session/assets', express.static(ASSETS_ROOT));
+
   // Podstawowy endpoint statusu
   app.get('/', (req, res) => {
     res.json({
@@ -181,6 +200,15 @@ function setupRoutes() {
   });
 
   // RS endpoints
+  app.get('/api/rs/system', async (req, res) => {
+    try {
+      const runtime = await rs.getRuntimeInfo();
+      res.json({ success: true, runtime });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.get('/api/rs/config', (req, res) => {
     try {
       const config = rs.loadConfig();
@@ -267,6 +295,171 @@ function setupRoutes() {
     }
   });
 
+  app.get('/api/cdf/status', (req, res) => {
+    res.json({ success: true, status: cdf.getStatus() });
+  });
+
+  app.get('/api/events/stream', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    sseClients.add(res);
+    res.write(`data: ${JSON.stringify({
+      type: 'snapshot',
+      payload: {
+        loadSession: loadSession.getStatus(),
+        cdf: cdf.getStatus(),
+        rfid: tdc.getRfidStatus ? tdc.getRfidStatus() : { active: false, readers: [] },
+      },
+      timestamp: new Date().toISOString()
+    })}\n\n`);
+
+    req.on('close', () => {
+      sseClients.delete(res);
+    });
+  });
+
+  app.post('/api/cdf/manual', (req, res) => {
+    try {
+      const batchNumber = String(req.body?.batchNumber || '').trim();
+      if (!batchNumber) {
+        return res.status(400).json({ success: false, error: 'Brak numeru partii' });
+      }
+      cdf.setManualBatchNumber(batchNumber);
+      res.json({ success: true, status: cdf.getStatus() });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/load-session/status', (req, res) => {
+    res.json({ success: true, ...loadSession.getStatus(), cdf: cdf.getStatus() });
+  });
+
+  app.post('/api/load-session/batch-number', async (req, res) => {
+    try {
+      const result = await loadSession.setBatchNumber(req.body?.batchNumber, req.body?.source || 'manual');
+      res.json({ success: true, result, status: loadSession.getStatus() });
+    } catch (err) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/load-session/start', async (req, res) => {
+    try {
+      const provided = String(req.body?.batchNumber || '').trim();
+      const fallback = cdf.getStatus().lastBatchNumber;
+      const batchNumber = provided || fallback;
+      const source = provided ? 'manual' : (cdf.getStatus().lastSource || 'cdf');
+      const status = await loadSession.start(batchNumber, source);
+      res.json({ success: true, ...status });
+    } catch (err) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/load-session/stop', async (req, res) => {
+    try {
+      const result = await loadSession.stop();
+      const ftpConfig = configWatcher.lastConfig?.network?.ftp || {};
+      const ftpResult = await captureImagesForSummary(result.summary, ftpConfig);
+      const enrichedSummary = await loadSession.enrichLastSummary({
+        images: ftpResult.images,
+        imageCount: ftpResult.images.length,
+        ftpCapture: ftpResult.ftpCapture,
+      });
+      cdf.clearBatchNumber();
+      res.json({
+        success: true,
+        ...result,
+        summary: enrichedSummary || {
+          ...result.summary,
+          images: ftpResult.images,
+          imageCount: ftpResult.images.length,
+          ftpCapture: ftpResult.ftpCapture,
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/network/ping', async (req, res) => {
+    try {
+      const host = String(req.body?.host || '').trim();
+      const port = Number(req.body?.port) || 0;
+
+      if (!host) {
+        return res.status(400).json({ success: false, error: 'Brak hosta do sprawdzenia' });
+      }
+
+      const icmp = await ping.promise.probe(host, { timeout: 2 });
+      const tcp = await new Promise((resolve) => {
+        if (!port) {
+          resolve({ ok: null, message: 'Brak portu TCP' });
+          return;
+        }
+
+        const socket = new net.Socket();
+        const finish = (payload) => {
+          socket.destroy();
+          resolve(payload);
+        };
+
+        socket.setTimeout(2000);
+        socket.once('connect', () => finish({ ok: true, message: 'TCP connection established' }));
+        socket.once('timeout', () => finish({ ok: false, message: 'TCP timeout' }));
+        socket.once('error', (error) => finish({ ok: false, message: error.message }));
+        socket.connect(port, host);
+      });
+
+      res.json({
+        success: true,
+        icmp: {
+          ok: icmp.alive,
+          timeMs: icmp.time,
+          output: icmp.output,
+        },
+        tcp,
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/network/reconnect', async (req, res) => {
+    try {
+      const target = String(req.body?.target || '').trim().toLowerCase();
+      const config = configWatcher.lastConfig || {};
+
+      if (target === 'rfid') {
+        tdc.reloadSystemConfig(config, true);
+        return res.json({ success: true, message: 'Polaczenie RFID zostalo zrestartowane' });
+      }
+
+      if (target === 'cdf') {
+        cdf.applyConfig(config?.network?.cdf || null);
+        cdf.restart();
+        return res.json({ success: true, message: 'Polaczenie CDF zostalo zrestartowane' });
+      }
+
+      if (target === 'rs') {
+        rs.restartSerial();
+        return res.json({ success: true, message: 'Polaczenie RS zostalo zrestartowane' });
+      }
+
+      if (target === 'ftp') {
+        return res.json({ success: true, message: 'FTP nie utrzymuje stalego polaczenia - konfiguracja gotowa do uzycia' });
+      }
+
+      return res.status(400).json({ success: false, error: 'Nieznany target reconnect' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // Endpointy modułów
   systemStats.setup(app);
   utils.setup(app);
@@ -295,6 +488,46 @@ async function startServices() {
     console.log('Inicjalizacja TDC...');
     await tdc.initialize();
 
+    console.log('Inicjalizacja sesji załadunku...');
+    await loadSession.initialize();
+
+    console.log('Inicjalizacja CDF...');
+    cdf.applyConfig(config.network?.cdf || null);
+    configWatcher.on('configChanged', ({ newConfig }) => {
+      cdf.applyConfig(newConfig?.network?.cdf || null);
+    });
+    cdf.on('batchNumber', async ({ batchNumber, source }) => {
+      try {
+        await loadSession.setBatchNumber(batchNumber, source);
+      } catch (error) {
+        console.log('[CDF] Zaktualizowano numer partii poza aktywną sesją:', batchNumber);
+      }
+    });
+    cdf.on('frameReceived', (payload) => {
+      publishEvent('cdf.frame', payload);
+    });
+    cdf.on('batchNumber', (payload) => {
+      publishEvent('cdf.batchNumber', payload);
+      publishEvent('cdf.status', cdf.getStatus());
+    });
+
+    loadSession.on('started', (payload) => {
+      publishEvent('loadSession.started', payload);
+      publishEvent('loadSession.status', loadSession.getStatus());
+    });
+    loadSession.on('stopped', (payload) => {
+      publishEvent('loadSession.stopped', payload);
+      publishEvent('loadSession.status', loadSession.getStatus());
+    });
+    loadSession.on('cycleRegistered', (payload) => {
+      publishEvent('loadSession.cycleRegistered', payload);
+      publishEvent('loadSession.status', loadSession.getStatus());
+    });
+    loadSession.on('batchNumberChanged', (payload) => {
+      publishEvent('loadSession.batchNumberChanged', payload);
+      publishEvent('loadSession.status', loadSession.getStatus());
+    });
+
 
 
     tdc.on('cycleCompleted', async (result) => {
@@ -305,6 +538,25 @@ async function startServices() {
       } catch (error) {
         console.error('[SEC] Błąd:', error);
       }
+    });
+    tdc.on('rfidCycleCompleted', (payload) => {
+      publishEvent('rfid.cycle', payload);
+      publishEvent('rfid.status', tdc.getRfidStatus());
+    });
+
+    if (tdc.getRfidStatus) {
+      const currentStatus = tdc.getRfidStatus();
+      if (currentStatus?.readers) {
+        publishEvent('rfid.status', currentStatus);
+      }
+    }
+
+    tdc.on('rfidFrameReceived', (payload) => {
+      publishEvent('rfid.frame', payload);
+      publishEvent('rfid.status', tdc.getRfidStatus());
+    });
+    tdc.on('rfidStatusChanged', (payload) => {
+      publishEvent('rfid.status', payload);
     });
 
     // Uruchom watchery konfiguracji
@@ -326,6 +578,7 @@ async function shutdown() {
       digitalIOManager.cleanup(),
       tdc.cleanup()
     ]);
+    cdf.stop();
     configWatcher.stop();
     console.log('Aplikacja zamknięta pomyślnie');
     process.exit(0);

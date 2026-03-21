@@ -12,6 +12,7 @@ class DigitalIOManager {
     this.config = null;
     this.client = null;
     this.isConnected = false;
+    this.isEnabled = false;
     this.reconnectTimer = null;
     this.retryCount = 0;
     this.cleanupConfigWatcher = null;
@@ -31,13 +32,16 @@ class DigitalIOManager {
   async initialize() {
     await this.updateConfig();
     this.watchConfigurationChanges();
-    await this.createConnection();
+    if (this.isEnabled) {
+      await this.createConnection();
+    }
   }
 
   async updateConfig() {
     const tdcConfig = configWatcher.lastConfig?.tdc?.deviceConfig;
     
     if (tdcConfig) {
+      this.isEnabled = true;
       this.config = {
         ...this.defaultConfig,
         ipAddress: tdcConfig.ipAddress || this.defaultConfig.ipAddress,
@@ -46,8 +50,10 @@ class DigitalIOManager {
       
       await logState(`[DigitalIO] Zaktualizowano konfigurację: ${this.config.ipAddress}:${this.config.port}`);
     } else {
-      this.config = { ...this.defaultConfig };
-      await logState('[DigitalIO] Używam domyślnej konfiguracji');
+      this.isEnabled = false;
+      this.config = null;
+      this.isConnected = false;
+      await logState('[DigitalIO] Brak konfiguracji TDC deviceConfig - moduł DigitalIO pozostaje wyłączony');
     }
   }
 
@@ -61,9 +67,15 @@ class DigitalIOManager {
         await logState('[DigitalIO] Wykryto zmianę konfiguracji TDC');
         const oldConfig = JSON.parse(JSON.stringify(this.config));
         await this.updateConfig();
+
+        if (!this.isEnabled) {
+          this.isConnected = false;
+          this.client = null;
+          return;
+        }
         
         // Jeśli zmienił się adres IP lub port, odtwórz połączenie
-        if (oldConfig.ipAddress !== this.config.ipAddress || oldConfig.port !== this.config.port) {
+        if (!oldConfig || oldConfig.ipAddress !== this.config.ipAddress || oldConfig.port !== this.config.port) {
           await this.recreateConnection();
         }
       }
@@ -150,6 +162,10 @@ class DigitalIOManager {
   }
 
   async ensureConnection() {
+    if (!this.isEnabled) {
+      throw new Error('DigitalIO is disabled - missing TDC deviceConfig');
+    }
+
     if (!this.isConnected || !this.client) {
       await this.createConnection();
       if (!this.isConnected) {
@@ -263,6 +279,7 @@ class DigitalIOManager {
   getStatus() {
     return {
       isConnected: this.isConnected,
+      isEnabled: this.isEnabled,
       retryCount: this.retryCount,
       config: {
         ipAddress: this.config?.ipAddress,

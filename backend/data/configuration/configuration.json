@@ -1,34 +1,36 @@
 {
+  "mode": "rfid",
   "tdc": {
-    "deviceConfig": {
-      "ipAddress": "192.168.0.100",
-      "login": "admin",
-      "password": "Welcome1!"
-    },
-    "waitForBoth": true,
     "cycleTimeout": 5000,
     "sendIncompleteData": true
   },
-  "mode": "rfid",
-  "lectory": {
-    "lewy": "192.168.0.2",
-    "prawy": "192.168.0.3",
-    "przód": "192.168.0.1",
-    "tył": "192.168.0.4"
+  "network": {
+    "rfidHead": {
+      "host": "127.0.0.1",
+      "port": 2112,
+      "role": "server"
+    },
+    "cdf": {
+      "host": "127.0.0.1",
+      "port": 4001,
+      "role": "server"
+    },
+    "ftp": {
+      "host": "127.0.0.1",
+      "port": 21,
+      "role": "client",
+      "username": "sick",
+      "password": "sick",
+      "remotePath": "/sick"
+    }
   },
   "rfid": {
-    "expectedTags": 8,
-    "readers": [
-      {
-        "id": "RFID-1",
-        "ip": "192.168.0.1",
-        "port": 2112
-      },
-      {
-        "id": "RFID-2",
-        "ip": "192.168.0.2",
-        "port": 2112
-      }
-    ]
+    "expectedTags": 5,
+    "head": {
+      "id": "RFID Head",
+      "host": "127.0.0.1",
+      "port": 2112,
+      "role": "server"
+    }
   }
 }

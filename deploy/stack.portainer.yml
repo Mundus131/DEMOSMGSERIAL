@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  backend:
+    image: ghcr.io/${GHCR_OWNER}/${GHCR_REPOSITORY}-backend:${BACKEND_TAG:-latest}
+    container_name: samsung-rfid-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-5010}:5010"
+    environment:
+      PORT: "5010"
+      FTP_LOCAL_ROOT: "/ftp-mirror"
+    volumes:
+      - backend_configuration:/app/data/configuration
+      - backend_logs:/app/data/logs
+      - backend_load_sessions:/app/data/load-sessions
+      - type: bind
+        source: ${FTP_MIRROR_HOST_PATH}
+        target: /ftp-mirror
+        read_only: true
+    networks:
+      - samsung-rfid
+
+  frontend:
+    image: ghcr.io/${GHCR_OWNER}/${GHCR_REPOSITORY}-frontend:${FRONTEND_TAG:-latest}
+    container_name: samsung-rfid-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      PORT: "3000"
+      API_BASE_URL: ${API_BASE_URL:-}
+    networks:
+      - samsung-rfid
+
+networks:
+  samsung-rfid:
+    name: samsung-rfid
+
+volumes:
+  backend_configuration:
+  backend_logs:
+  backend_load_sessions:

@@ -6,12 +6,13 @@ const { decodeControlSequences } = require('./utils');
 const MultiLectorController = require('./multiLector');
 const RFIDController = require('./rfidController');
 const rsSender = require('./rsSender');
+const loadSession = require('./loadSession');
 const fs = require('fs');
 const path = require('path');
 let lectorController = null;
 let lectorConfig = null;
 let lectorPort = 2112;
-let currentMode = 'lectory';
+let currentMode = 'rfid';
 let rfidController = null;
 let rfidConfig = null;
 let tdcInstance = null;
@@ -236,7 +237,12 @@ async function setDigitalOutputsForAnalysis(analysis) {
   // Ustaw kierunki dla wszystkich wyjść
   const outputPins = ['DIO_A', 'DIO_B', 'DIO_C', 'DIO_D'];
   for (const pin of outputPins) {
-    digitalIOManager.setDirection(pin, "OUT");
+    try {
+      await digitalIOManager.setDirection(pin, "OUT");
+    } catch (error) {
+      await logState(`[TDC] Nie udalo sie ustawic kierunku ${pin}: ${error.message}`);
+      return;
+    }
   }
   
   // DIO_A - wszystkie kody odczytane poprawnie (4 lub 6)
@@ -457,9 +463,19 @@ async function handleRfidCycle(results) {
       uniqueCount: allCodes.length,
       expectedCount: expectedCount || 0,
       goodRead: isValidRead,
+      uniqueCodes: allCodes,
       results
     });
   }
+
+  await loadSession.registerCycle({
+    timestamp: new Date().toISOString(),
+    uniqueCount: allCodes.length,
+    expectedCount: expectedCount || 0,
+    goodRead: isValidRead,
+    uniqueCodes: allCodes,
+    results,
+  });
 
   if (allCodes.length === 0) {
     await logState('[RFID] Brak kod?w do wysy?ki przez RS');
@@ -486,6 +502,13 @@ async function handleRfidCycle(results) {
 }
 
 function attachRfidHandlers(controller) {
+  controller.on('frameReceived', (payload) => {
+    if (tdcInstance) {
+      tdcInstance.emit('rfidFrameReceived', payload);
+      tdcInstance.emit('rfidStatusChanged', controller.getStatus());
+    }
+  });
+
   controller.on('cycleCompleted', async ({ success, results }) => {
     console.log('===> Wyniki cyklu RFID:', JSON.stringify(results, null, 2));
     await handleRfidCycle(results);
@@ -504,7 +527,21 @@ function startLectors(config) {
 }
 
 function startRfid(config) {
-  const readers = config?.readers || [];
+  const readers = [];
+  const singleHead = config?.head;
+  const legacyReaders = Array.isArray(config?.readers) ? config.readers : [];
+
+  if (singleHead?.host && singleHead?.port) {
+    readers.push({
+      id: singleHead.id || 'RFID Head',
+      ip: singleHead.host,
+      port: singleHead.port,
+      role: singleHead.role || 'client',
+    });
+  } else {
+    readers.push(...legacyReaders);
+  }
+
   if (!Array.isArray(readers) || readers.length === 0) {
     console.log('[RFID] Brak konfiguracji czytnik?w - nie uruchamiam po??cze?');
     return;
@@ -515,25 +552,13 @@ function startRfid(config) {
   rfidController = controller;
 }
 
-function applySystemConfig(systemConfig, tdcInstance) {
-  const nextMode = systemConfig?.mode || currentMode || 'lectory';
+function applySystemConfig(systemConfig, tdcInstance, forceRestart = false) {
+  const nextMode = 'rfid';
   currentMode = nextMode;
 
   const nextLectors = systemConfig?.lectory || {};
   if (tdcInstance) {
     tdcInstance.config.lectory = nextLectors;
-  }
-
-  if (currentMode === 'lectory') {
-    const nextLectorsJson = JSON.stringify(nextLectors);
-    const prevLectorsJson = lectorConfig ? JSON.stringify(lectorConfig) : null;
-    if (prevLectorsJson !== nextLectorsJson) {
-      stopLectors();
-      stopRfid();
-      lectorConfig = nextLectors;
-      startLectors(lectorConfig);
-    }
-    return;
   }
 
   // tryb RFID
@@ -542,7 +567,7 @@ function applySystemConfig(systemConfig, tdcInstance) {
   const nextRfid = systemConfig?.rfid || {};
   const nextRfidJson = JSON.stringify(nextRfid);
   const prevRfidJson = rfidConfig ? JSON.stringify(rfidConfig) : null;
-  if (prevRfidJson !== nextRfidJson) {
+  if (forceRestart || prevRfidJson !== nextRfidJson) {
     stopRfid();
     rfidConfig = nextRfid;
     startRfid(rfidConfig);
@@ -592,7 +617,11 @@ class TDCController extends EventEmitter {
     this.digitalMonitoringActive = true;
     const triggerPin = 'DI_A';
     const checkIntervalMs = 50;
-    digitalIOManager.setDirection('DIO_A',"OUT")
+    try {
+      await digitalIOManager.setDirection('DIO_A',"OUT");
+    } catch (error) {
+      await logState(`[TDC] Pomijam ustawienie kierunku DIO_A: ${error.message}`);
+    }
     await logState(`[TDC] Rozpoczynam monitorowanie wejść cyfrowych co ${checkIntervalMs}ms`);
 
     try {
@@ -1260,17 +1289,35 @@ app.get('/api/tdc/rs-sender/history', (req, res) => {
     this.emit('rfidCycleCompleted', payload);
   }
 
+  reloadSystemConfig(systemConfig, forceRestart = false) {
+    applySystemConfig(systemConfig, this, forceRestart);
+  }
+
   getRfidStatus() {
     if (rfidController) {
       return rfidController.getStatus();
     }
-    const fallbackReaders = (configWatcher.lastConfig?.rfid?.readers || []).map((reader, index) => ({
-      id: reader.id || ('RFID-' + (index + 1)),
-      ip: reader.ip,
-      port: reader.port,
-      lastRead: null
-    }));
+    const head = configWatcher.lastConfig?.rfid?.head;
+    const legacyReaders = configWatcher.lastConfig?.rfid?.readers || [];
+    const fallbackReaders = head?.host
+      ? [{
+          id: head.id || 'RFID Head',
+          ip: head.host,
+          port: head.port,
+          role: head.role || 'client',
+          lastRead: null,
+        }]
+      : legacyReaders.map((reader, index) => ({
+          id: reader.id || ('RFID-' + (index + 1)),
+          ip: reader.ip,
+          port: reader.port,
+          lastRead: null
+        }));
     return { active: false, readers: fallbackReaders };
+  }
+
+  getRfidController() {
+    return rfidController;
   }
 }
 

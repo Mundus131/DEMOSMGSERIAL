@@ -2,6 +2,7 @@ const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
 
@@ -67,7 +68,7 @@ function loadConfig() {
     // Domyślna konfiguracja
     const defaultConfig = {
       serial: {
-        path: '/dev/ttyUSB0',
+        path: process.platform === 'win32' ? 'COM1' : '/dev/ttyUSB0',
         baudRate: 9600,
         dataBits: 8,
         stopBits: 1,
@@ -80,9 +81,10 @@ function loadConfig() {
 }
 
 function saveConfig(newConfig) {
+  const nextConfig = newConfig?.serial ? newConfig : { serial: newConfig };
   try {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(newConfig, null, 2));
-    console.log('💾 [CONFIG] Konfiguracja zapisana:', newConfig.serial);
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(nextConfig, null, 2));
+    console.log('💾 [CONFIG] Konfiguracja zapisana:', nextConfig.serial);
     restartSerial(); // apply config immediately
   } catch (error) {
     console.error('❌ [CONFIG] Błąd zapisywania konfiguracji:', error.message);
@@ -123,6 +125,17 @@ function startSerial() {
   if (serialPort && isPortOpen) {
     console.log('🔁 [SERIAL] Port już otwarty, zamykam...');
     stopSerial();
+  }
+
+  const invalidForWindows = process.platform === 'win32' && typeof config.path === 'string' && config.path.startsWith('/dev/');
+  const invalidForUnix = process.platform !== 'win32' && typeof config.path === 'string' && /^COM\d+$/i.test(config.path);
+  const missingPath = !config.path;
+
+  if (missingPath || invalidForWindows || invalidForUnix) {
+    console.warn(`⚠️ [SERIAL] Pomijam start portu szeregowego dla ścieżki "${config.path || '(brak)'}" na platformie ${process.platform}`);
+    isPortOpen = false;
+    lastSerialData = '';
+    return;
   }
 
   console.log(`🔧 [SERIAL] Otwieranie portu: ${config.path}, Baud: ${config.baudRate}, DataBits: ${config.dataBits}, StopBits: ${config.stopBits}, Parity: ${config.parity}`);
@@ -565,6 +578,30 @@ async function checkStatus(metadata = new grpc.Metadata()) {
   }
 }
 
+async function listAvailablePorts() {
+  const ports = await SerialPort.list();
+  return ports.map((port) => ({
+    path: port.path,
+    manufacturer: port.manufacturer || '',
+    serialNumber: port.serialNumber || '',
+    pnpId: port.pnpId || '',
+    vendorId: port.vendorId || '',
+    productId: port.productId || '',
+    friendlyName: [port.path, port.manufacturer].filter(Boolean).join(' - '),
+  }));
+}
+
+async function getRuntimeInfo() {
+  return {
+    platform: process.platform,
+    release: os.release(),
+    arch: process.arch,
+    hostname: os.hostname(),
+    serialPorts: await listAvailablePorts(),
+    currentConfig: loadConfig().serial,
+  };
+}
+
 module.exports = {
   loadConfig,
   saveConfig,
@@ -592,6 +629,8 @@ module.exports = {
   getLastSerialData,
   getPortStatus,
   clearBuffer,
+  listAvailablePorts,
+  getRuntimeInfo,
   // DODANE FUNKCJE SSE:
   addSseClient,
   removeSseClient,

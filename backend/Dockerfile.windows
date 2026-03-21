@@ -1,0 +1,18 @@
+# escape=`
+FROM node:20-windowsservercore-ltsc2022
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY . .
+
+RUN powershell -NoLogo -Command "New-Item -ItemType Directory -Force data\\configuration, data\\logs, data\\load-sessions\\assets | Out-Null"
+
+ENV NODE_ENV=production `
+    PORT=5010
+
+EXPOSE 5010
+
+CMD ["node", "server.js"]

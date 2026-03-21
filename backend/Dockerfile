@@ -1,24 +1,21 @@
-# Backend: Node.js
-FROM node:20-alpine AS build
+FROM node:20-bookworm-slim
 
-# Narzędzia do node-gyp (np. diskusage)
-RUN apk add --no-cache python3 make g++
-
-# Utwórz katalog roboczy
 WORKDIR /app
 
-# Skopiuj package.json i package-lock.json
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
-# Instalacja zależności
-RUN npm install
-
-# Skopiuj resztę plików backendu
 COPY . .
 
-# Wystaw port (zmień jeśli Twój backend działa na innym)
+RUN mkdir -p /app/data/configuration /app/data/logs /app/data/load-sessions/assets
+
+ENV NODE_ENV=production
+ENV PORT=5010
+
 EXPOSE 5010
 
-
-# Komenda startowa
 CMD ["node", "server.js"]

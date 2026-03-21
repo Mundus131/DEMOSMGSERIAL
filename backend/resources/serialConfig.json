@@ -1,9 +1,10 @@
 {
   "serial": {
-    "path": "/dev/ttyUSB0",
+    "path": "COM3",
     "baudRate": 9600,
     "dataBits": 8,
     "stopBits": 1,
-    "parity": "none"
+    "parity": "none",
+    "mode": "RS485"
   }
 }

@@ -82,6 +82,17 @@ const setup = (app) => {
       const { updated, skipped } = updateExistingKeysOnly(existingConfig, newValues);
 
       await saveConfiguration(existingConfig);
+      const configWatcher = require('./configWatcher');
+      const tdc = require('./tdc');
+      const cdf = require('./cdfa');
+      const rs = require('./rs');
+
+      configWatcher.lastConfig = existingConfig;
+      tdc.reloadSystemConfig(existingConfig, true);
+      cdf.applyConfig(existingConfig?.network?.cdf || null);
+      cdf.restart();
+      rs.restartSerial();
+
       res.json({
         success: true,
         message: 'Configuration partially updated',

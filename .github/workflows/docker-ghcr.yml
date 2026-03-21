@@ -1,0 +1,127 @@
+name: Build And Publish Containers
+
+on:
+  push:
+    branches:
+      - main
+      - refactor
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.event.repository.name }}
+
+jobs:
+  linux:
+    name: Linux Images
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+          - component: frontend
+            context: ./Frontend/dashboard
+            dockerfile: ./Frontend/dashboard/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_PREFIX }}-${{ matrix.component }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Linux image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  windows:
+    name: Windows Images
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            context: .\backend
+            dockerfile: .\backend\Dockerfile.windows
+          - component: frontend
+            context: .\Frontend\dashboard
+            dockerfile: .\Frontend\dashboard\Dockerfile.windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Windows image
+        shell: pwsh
+        run: |
+          $owner = "${{ github.repository_owner }}".ToLowerInvariant()
+          $repo = "${{ env.IMAGE_PREFIX }}".ToLowerInvariant()
+          $refName = "${{ github.ref_name }}".ToLowerInvariant().Replace('/', '-')
+          $image = "${{ env.REGISTRY }}/$owner/$repo-${{ matrix.component }}-windows"
+          $shaTag = "$image:sha-${{ github.sha }}"
+          $refTag = "$image:$refName"
+          $tags = @($shaTag, $refTag)
+
+          if ("${{ github.ref_name }}" -eq "${{ github.event.repository.default_branch }}") {
+            $tags += "$image:latest"
+          }
+
+          foreach ($tag in $tags) {
+            docker build `
+              --build-arg NEXT_PUBLIC_API_BASE_URL= `
+              --file "${{ matrix.dockerfile }}" `
+              --tag $tag `
+              "${{ matrix.context }}"
+          }
+
+          foreach ($tag in $tags) {
+            docker push $tag
+          }

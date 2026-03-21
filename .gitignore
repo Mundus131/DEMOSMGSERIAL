@@ -2,3 +2,22 @@
 /data/
 /tdc/
 *.tar
+
+# Node dependencies
+/backend/node_modules/
+/Frontend/dashboard/node_modules/
+
+# Frontend build artifacts
+/Frontend/dashboard/.next/
+/Frontend/dashboard/out/
+/Frontend/dashboard/build/
+
+# Backend runtime data
+/backend/data/logs/
+/backend/data/load-sessions/
+/backend/resources/rs_send_results.json
+
+# Environment files
+.env
+.env.*
+!/deploy/.env.stack.example

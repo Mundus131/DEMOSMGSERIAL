@@ -7,6 +7,7 @@ class TokenManager {
     this.currentToken = null;
     this.tokenExpiry = null;
     this.config = null;
+    this.isEnabled = false;
     this.refreshTimer = null;
     this.reconnectTimer = null;
     this.isRefreshing = false;
@@ -30,13 +31,16 @@ class TokenManager {
   async initialize() {
     await this.updateConfig();
     this.watchConfigurationChanges();
-    await this.refreshToken();
+    if (this.isEnabled) {
+      await this.refreshToken();
+    }
   }
 
   async updateConfig() {
     const tdcConfig = configWatcher.lastConfig?.tdc?.deviceConfig;
     
     if (tdcConfig) {
+      this.isEnabled = true;
       this.config = {
         ...this.defaultConfig,
         ipAddress: tdcConfig.ipAddress || this.defaultConfig.ipAddress,
@@ -47,8 +51,11 @@ class TokenManager {
       
       await logState(`[TokenManager] Zaktualizowano konfigurację: ${this.config.ipAddress}`);
     } else {
-      this.config = { ...this.defaultConfig };
-      await logState('[TokenManager] Używam domyślnej konfiguracji');
+      this.isEnabled = false;
+      this.config = null;
+      this.currentToken = null;
+      this.tokenExpiry = null;
+      await logState('[TokenManager] Brak konfiguracji TDC deviceConfig - token manager pozostaje wyłączony');
     }
   }
 
@@ -62,7 +69,9 @@ class TokenManager {
         await logState('[TokenManager] Wykryto zmianę konfiguracji TDC');
         await this.updateConfig();
         // Odśwież token z nową konfiguracją
-        await this.refreshToken();
+        if (this.isEnabled) {
+          await this.refreshToken();
+        }
       }
     };
 
@@ -74,6 +83,9 @@ class TokenManager {
   }
 
   async getToken() {
+    if (!this.isEnabled) {
+      throw new Error('TokenManager is disabled - missing TDC deviceConfig');
+    }
     if (!this.currentToken || this.isTokenExpired()) {
       await this.refreshToken();
     }
@@ -180,6 +192,7 @@ class TokenManager {
   getStatus() {
     return {
       hasToken: !!this.currentToken,
+      isEnabled: this.isEnabled,
       tokenExpiry: this.tokenExpiry,
       isRefreshing: this.isRefreshing,
       retryCount: this.retryCount,
