@@ -1,23 +1,47 @@
 version: "3.9"
 
 services:
+  ftp:
+    image: fauria/vsftpd:latest
+    container_name: samsung-rfid-ftp
+    restart: unless-stopped
+    ports:
+      - "${FTP_PORT:-21}:21"
+      - "${FTP_PASV_MIN_PORT:-21100}-${FTP_PASV_MAX_PORT:-21110}:${FTP_PASV_MIN_PORT:-21100}-${FTP_PASV_MAX_PORT:-21110}"
+    environment:
+      FTP_USER: ${FTP_USER:-SICK}
+      FTP_PASS: ${FTP_PASS:-SICK}
+      PASV_ENABLE: "YES"
+      PASV_ADDRESS: ${FTP_PASV_ADDRESS:-}
+      PASV_ADDR_RESOLVE: ${FTP_PASV_ADDR_RESOLVE:-NO}
+      PASV_MIN_PORT: ${FTP_PASV_MIN_PORT:-21100}
+      PASV_MAX_PORT: ${FTP_PASV_MAX_PORT:-21110}
+      LOG_STDOUT: "YES"
+      FILE_OPEN_MODE: ${FTP_FILE_OPEN_MODE:-0666}
+      LOCAL_UMASK: ${FTP_LOCAL_UMASK:-022}
+      REVERSE_LOOKUP_ENABLE: "NO"
+    volumes:
+      - ftp_data:/home/vsftpd
+      - ftp_logs:/var/log/vsftpd
+    networks:
+      - samsung-rfid
+
   backend:
     image: ghcr.io/${GHCR_OWNER}/${GHCR_REPOSITORY}-backend:${BACKEND_TAG:-latest}
     container_name: samsung-rfid-backend
     restart: unless-stopped
+    depends_on:
+      - ftp
     ports:
       - "${BACKEND_PORT:-5010}:5010"
     environment:
       PORT: "5010"
-      FTP_LOCAL_ROOT: "/ftp-mirror"
+      FTP_LOCAL_ROOT: "/ftp-mirror-root/${FTP_USER:-SICK}"
     volumes:
       - backend_configuration:/app/data/configuration
       - backend_logs:/app/data/logs
       - backend_load_sessions:/app/data/load-sessions
-      - type: bind
-        source: ${FTP_MIRROR_HOST_PATH}
-        target: /ftp-mirror
-        read_only: true
+      - ftp_data:/ftp-mirror-root:ro
     networks:
       - samsung-rfid
 
@@ -43,3 +67,5 @@ volumes:
   backend_configuration:
   backend_logs:
   backend_load_sessions:
+  ftp_data:
+  ftp_logs:

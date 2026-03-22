@@ -4,6 +4,7 @@ System sklada sie z dwóch glównych czesci:
 
 - `backend` - serwer Node.js obslugujacy RFID, CDF, RS, konfiguracje i sesje zaladunku
 - `Frontend/dashboard` - frontend Next.js z interfejsem operatorskim opartym o Synergy Design System
+- `ftp` - serwer FTP dla obrazów i plików z loginem `SICK`
 
 Repo jest przygotowane pod:
 
@@ -90,7 +91,10 @@ Frontend generuje runtime config przy starcie kontenera, wiec nie trzeba go prze
    - `GHCR_REPOSITORY`
    - `BACKEND_TAG`
    - `FRONTEND_TAG`
-   - `FTP_MIRROR_HOST_PATH`
+   - `FTP_USER`
+   - `FTP_PASS`
+   - `FTP_PORT`
+   - opcjonalnie `FTP_PASV_ADDRESS`
    - opcjonalnie `API_BASE_URL`
 3. W Portainerze wybierz `Stacks`.
 4. Dodaj nowy stack i wklej zawartosc [deploy/stack.portainer.yml](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/deploy/stack.portainer.yml).
@@ -100,7 +104,10 @@ Uwagi:
 
 - stack jest przygotowany pod obrazy Linuxowe
 - obrazy Windows sa publikowane osobno do GHCR i wymagaja Windows Docker host
-- dla lokalnego fallbacku zdjec FTP zamontuj katalog lustra FTP do `FTP_MIRROR_HOST_PATH`
+- stack stawia tez lokalny serwer FTP na porcie `21`
+- domyslny login i haslo w stacku to `SICK` / `SICK`
+- dla poprawnego transferu FTP publikowany jest tez zakres portów pasywnych `21100-21110`
+- backend czyta lokalne lustro FTP bezposrednio ze wspolnego volume `ftp_data`
 
 ## GitHub Actions i GHCR
 
@@ -150,6 +157,7 @@ Wazne:
 - `backend/node_modules`, logi i sesje zaladunku nie powinny byc commitowane do repo
 - konfiguracja produkcyjna powinna byc utrzymywana przez volume lub bind mount, nie przez bake obrazu
 - frontend korzysta z `API_BASE_URL` ustawianego w runtime
+- przy korzystaniu z klientow FTP spoza hosta warto ustawic `FTP_PASV_ADDRESS` na adres IP lub DNS hosta
 
 ## Dodatkowa dokumentacja
 

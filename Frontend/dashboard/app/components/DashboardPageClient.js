@@ -222,11 +222,15 @@ export default function DashboardPageClient() {
 
   const currentBatch = sessionStatus?.session?.batchNumber || cdfStatus?.lastBatchNumber || '';
   const reader = rfidStatus?.readers?.[0];
-  const latestTagsRaw = (lastCycle?.uniqueCodes?.length ? lastCycle.uniqueCodes : reader?.lastRead?.tags) || [];
-  const latestTags = latestTagsRaw.filter((tag) => {
+  const session = sessionStatus?.session;
+  const latestTagsRaw = [
+    ...((lastCycle?.uniqueCodes?.length ? lastCycle.uniqueCodes : reader?.lastRead?.tags) || []),
+    ...((session?.recentReads || [])),
+  ];
+  const latestTags = Array.from(new Set(latestTagsRaw.filter((tag) => {
     const normalized = String(tag || '').trim().toLowerCase();
     return normalized && normalized !== 'noread' && normalized !== 'norread';
-  });
+  })));
   const cycleExpected = Number(lastCycle?.expectedCount || sessionStatus?.session?.expectedCount || 0 || 0);
   const cycleCount = Number(
     lastCycle?.uniqueCount
@@ -234,10 +238,12 @@ export default function DashboardPageClient() {
       : latestTags.length || 0
   );
   const cycleGood = lastCycle ? Boolean(lastCycle.goodRead) : cycleCount > 0;
-  const session = sessionStatus?.session;
   const dashboardStateClass = lastCycle
     ? (cycleGood ? 'operator-dashboard-frame--good' : 'operator-dashboard-frame--bad')
     : 'operator-dashboard-frame--idle';
+  const innerStatusClass = lastCycle
+    ? (cycleGood ? 'dashboard-card-state--good' : 'dashboard-card-state--bad')
+    : 'dashboard-card-state--idle';
   const summaryImages = [...(summary?.images || [])].sort((left, right) => {
     const leftTime = new Date(left?.modifiedAt || 0).getTime();
     const rightTime = new Date(right?.modifiedAt || 0).getTime();
@@ -257,7 +263,7 @@ export default function DashboardPageClient() {
         </syn-badge>
       </div>
       <div className="page-stack operator-dashboard">
-        <syn-card className="page-card operator-dashboard__control">
+        <syn-card className={`page-card operator-dashboard__control ${innerStatusClass}`}>
           <div className="section-header">
             <div>
               <p className="eyebrow">Sterowanie</p>
@@ -311,7 +317,7 @@ export default function DashboardPageClient() {
           {message && <div className={`inline-message ${message.type}`}>{message.text}</div>}
         </syn-card>
 
-        <syn-card className={`page-card cycle-card operator-dashboard__rfid ${cycleGood ? 'is-good' : 'is-bad'}`}>
+        <syn-card className={`page-card cycle-card operator-dashboard__rfid ${innerStatusClass} ${cycleGood ? 'is-good' : 'is-bad'}`}>
           <div className="section-header">
             <div>
               <p className="eyebrow">Ostatni odczyt</p>
@@ -340,7 +346,7 @@ export default function DashboardPageClient() {
           </div>
         </syn-card>
 
-        <syn-card className="status-card operator-dashboard__rs">
+        <syn-card className={`status-card operator-dashboard__rs ${innerStatusClass}`}>
           <div className="status-card__header">
             <div>
               <p className="eyebrow">RS</p>

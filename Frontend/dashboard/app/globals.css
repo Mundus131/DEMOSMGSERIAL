@@ -204,22 +204,28 @@ body {
   padding: 14px;
   border-radius: calc(var(--shell-radius) + 12px);
   border: 6px solid transparent;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.4));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.72));
 }
 
 .operator-dashboard-frame--good {
   border-color: var(--operator-good);
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--operator-good) 16%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--operator-good-soft) 58%, #ffffff) 0%, color-mix(in srgb, var(--operator-good-soft) 30%, #ffffff) 100%);
+  box-shadow: 0 0 0 8px color-mix(in srgb, var(--operator-good) 20%, transparent);
 }
 
 .operator-dashboard-frame--bad {
   border-color: var(--operator-bad);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--operator-bad-soft) 56%, #ffffff) 0%, color-mix(in srgb, var(--operator-bad-soft) 28%, #ffffff) 100%);
   animation: operator-alert 1.2s ease-in-out infinite;
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--operator-bad) 16%, transparent);
+  box-shadow: 0 0 0 8px color-mix(in srgb, var(--operator-bad) 22%, transparent);
 }
 
 .operator-dashboard-frame--idle {
   border-color: #d8e0e6;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(247, 250, 252, 0.88) 100%);
 }
 
 .operator-dashboard__control {
@@ -277,6 +283,23 @@ body {
 .operator-dashboard__rfid::part(base),
 .operator-dashboard__rs::part(base) {
   height: 100%;
+}
+
+.dashboard-card-state--good::part(base) {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--operator-good-soft) 92%, #ffffff) 0%, color-mix(in srgb, var(--operator-good-soft) 46%, #ffffff) 100%);
+  border-color: color-mix(in srgb, var(--operator-good) 44%, var(--shell-border));
+}
+
+.dashboard-card-state--bad::part(base) {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--operator-bad-soft) 90%, #ffffff) 0%, color-mix(in srgb, var(--operator-bad-soft) 42%, #ffffff) 100%);
+  border-color: color-mix(in srgb, var(--operator-bad) 40%, var(--shell-border));
+}
+
+.dashboard-card-state--idle::part(base) {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 251, 253, 0.94) 100%);
 }
 
 .operator-dashboard .page-card,
@@ -800,11 +823,11 @@ syn-dialog::part(panel) {
   0%,
   100% {
     border-color: var(--operator-bad);
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--operator-bad) 12%, transparent);
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--operator-bad) 18%, transparent);
   }
   50% {
     border-color: #f06a75;
-    box-shadow: 0 0 0 12px color-mix(in srgb, var(--operator-bad) 22%, transparent);
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--operator-bad) 30%, transparent);
   }
 }
 

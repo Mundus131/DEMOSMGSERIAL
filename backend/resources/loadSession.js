@@ -24,6 +24,14 @@ class LoadSessionManager extends EventEmitter {
   async initialize() {
     await fs.ensureDir(SESSIONS_DIR);
     this.currentSession = await this.readJsonSafe(STATUS_FILE, null);
+    if (this.currentSession) {
+      this.currentSession.uniqueTags = Array.isArray(this.currentSession.uniqueTags) ? this.currentSession.uniqueTags : [];
+      this.currentSession.cycles = Array.isArray(this.currentSession.cycles) ? this.currentSession.cycles : [];
+      this.currentSession.recentReads = Array.isArray(this.currentSession.recentReads) ? this.currentSession.recentReads : [];
+      this.currentSession.externalReads = Array.isArray(this.currentSession.externalReads) ? this.currentSession.externalReads : [];
+      this.currentSession.totalReads = Number(this.currentSession.totalReads) || 0;
+      this.currentSession.cycleCount = Number(this.currentSession.cycleCount) || 0;
+    }
     this.lastSummary = await this.readJsonSafe(HISTORY_FILE, []).then((history) => history[0] || null);
     this.lastSummaryFilePath = this.lastSummary?.summaryFilePath || null;
   }
@@ -95,6 +103,8 @@ class LoadSessionManager extends EventEmitter {
       totalReads: 0,
       uniqueTags: [],
       cycles: [],
+      recentReads: [],
+      externalReads: [],
     };
 
     await this.writeCurrentSession();
@@ -123,12 +133,57 @@ class LoadSessionManager extends EventEmitter {
     this.currentSession.cycleCount += 1;
     this.currentSession.totalReads += uniqueCodes.length;
     this.currentSession.uniqueTags = Array.from(uniqueSet);
+    this.currentSession.recentReads = [...uniqueCodes];
     this.currentSession.cycles.unshift(cycleSummary);
     this.currentSession.cycles = this.currentSession.cycles.slice(0, 50);
     this.currentSession.updatedAt = new Date().toISOString();
 
     await this.writeCurrentSession();
     this.emit('cycleRegistered', this.currentSession);
+    return this.currentSession;
+  }
+
+  async registerExternalRead(code, source = 'cdf') {
+    if (!this.currentSession?.active) {
+      return null;
+    }
+
+    const normalized = String(code || '').trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const lowered = normalized.toLowerCase();
+    if (lowered === 'noread' || lowered === 'norread') {
+      return null;
+    }
+
+    const uniqueSet = new Set(this.currentSession.uniqueTags || []);
+    uniqueSet.add(normalized);
+
+    const recentSet = new Set(
+      [normalized, ...(Array.isArray(this.currentSession.recentReads) ? this.currentSession.recentReads : [])]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    );
+
+    const externalRead = {
+      timestamp: new Date().toISOString(),
+      source,
+      code: normalized,
+    };
+
+    this.currentSession.totalReads += 1;
+    this.currentSession.uniqueTags = Array.from(uniqueSet);
+    this.currentSession.recentReads = Array.from(recentSet).slice(0, 20);
+    this.currentSession.externalReads = [externalRead, ...(this.currentSession.externalReads || [])].slice(0, 50);
+    this.currentSession.updatedAt = externalRead.timestamp;
+
+    await this.writeCurrentSession();
+    this.emit('externalReadRegistered', {
+      session: this.currentSession,
+      read: externalRead,
+    });
     return this.currentSession;
   }
 
@@ -148,6 +203,8 @@ class LoadSessionManager extends EventEmitter {
       totalReads: this.currentSession.totalReads,
       uniqueTagCount: this.currentSession.uniqueTags.length,
       uniqueTags: this.currentSession.uniqueTags,
+      recentReads: this.currentSession.recentReads,
+      externalReads: this.currentSession.externalReads,
       cycles: this.currentSession.cycles,
     };
 

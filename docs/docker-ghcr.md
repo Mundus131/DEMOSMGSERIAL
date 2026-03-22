@@ -6,6 +6,7 @@
 - osobne obrazy Windows pod `windows/amd64`
 - publikacja do `GHCR`
 - stack dla Portainera w [deploy/stack.portainer.yml](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/deploy/stack.portainer.yml)
+- lokalny serwer FTP w stacku z loginem `SICK` i haslem `SICK`
 
 ## Nazwy obrazów w GHCR
 
@@ -65,7 +66,9 @@ Skopiuj [deploy/.env.stack.example](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/deploy/.
 
 - `GHCR_OWNER`
 - `GHCR_REPOSITORY`
-- `FTP_MIRROR_HOST_PATH`
+- `FTP_USER`
+- `FTP_PASS`
+- opcjonalnie `FTP_PASV_ADDRESS`
 
 Uwaga:
 
@@ -75,7 +78,11 @@ Ważne:
 
 - stack jest przygotowany pod Linuxowe obrazy i Linuxowy node Dockera
 - dla Windowsowych kontenerów obrazy są publikowane, ale deployment trzeba robić na Windows Docker host
-- jeśli chcesz korzystać z lokalnego fallbacku zdjęć FTP, zamontuj katalog lustra FTP do `FTP_MIRROR_HOST_PATH`
+- stack uruchamia też kontener `fauria/vsftpd`
+- dla FTP publikowany jest port `21` oraz zakres pasywny `21100-21110`
+- backend korzysta ze wspólnego volume `ftp_data`, więc nie trzeba już osobno montować katalogu lustra FTP
+
+Jeśli klient FTP łączy się spoza hosta Dockera, ustaw `FTP_PASV_ADDRESS` na publiczny lub lokalny adres hosta Dockera.
 
 ## Przykładowe wdrożenie w Portainerze
 

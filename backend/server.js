@@ -499,6 +499,7 @@ async function startServices() {
     cdf.on('batchNumber', async ({ batchNumber, source }) => {
       try {
         await loadSession.setBatchNumber(batchNumber, source);
+        await loadSession.registerExternalRead(batchNumber, source);
       } catch (error) {
         console.log('[CDF] Zaktualizowano numer partii poza aktywną sesją:', batchNumber);
       }
@@ -521,6 +522,10 @@ async function startServices() {
     });
     loadSession.on('cycleRegistered', (payload) => {
       publishEvent('loadSession.cycleRegistered', payload);
+      publishEvent('loadSession.status', loadSession.getStatus());
+    });
+    loadSession.on('externalReadRegistered', (payload) => {
+      publishEvent('loadSession.externalReadRegistered', payload);
       publishEvent('loadSession.status', loadSession.getStatus());
     });
     loadSession.on('batchNumberChanged', (payload) => {
