@@ -10,7 +10,7 @@ const defaultRsConfig = {
   dataBits: 8,
   stopBits: 1,
   parity: 'none',
-  mode: 'RS485',
+  mode: 'RS232',
 };
 
 const RS_MODE_OPTIONS = ['RS232', 'RS422', 'RS485'];
@@ -266,7 +266,7 @@ export default function RsPageClient() {
           <label className="field">
             <span>Tryb RS</span>
             <select
-              value={RS_MODE_OPTIONS.includes(configData.mode) ? configData.mode : 'RS485'}
+              value={RS_MODE_OPTIONS.includes(configData.mode) ? configData.mode : 'RS232'}
               onChange={(e) => setConfigData((prev) => ({ ...prev, mode: e.target.value }))}
             >
               {RS_MODE_OPTIONS.map((mode) => (

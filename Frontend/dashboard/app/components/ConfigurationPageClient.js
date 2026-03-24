@@ -13,12 +13,17 @@ const defaultSystemConfig = {
   network: {
     rfidHead: { host: '', port: 2112, role: 'client' },
     cdf: { host: '', port: 4001, role: 'client' },
-    ftp: { host: '', port: 21, role: 'client', username: '', password: '', remotePath: '/' },
+    ftp: { host: '', port: 21, role: 'client', username: 'SICK', password: 'SICK', remotePath: '/SICK' },
   },
   rfid: {
     expectedTags: 0,
     head: { id: 'RFID Head', host: '', port: 2112, role: 'client' },
   },
+};
+
+const FTP_FIXED_FIELDS = {
+  role: 'client',
+  remotePath: '/SICK',
 };
 
 function ConnectionSection({
@@ -27,6 +32,8 @@ function ConnectionSection({
   value,
   onChange,
   withCredentials = false,
+  lockRole = false,
+  lockCredentials = false,
   onPing,
   onReconnect,
   pingResult,
@@ -59,7 +66,11 @@ function ConnectionSection({
         </label>
         <label className="field">
           <span>Tryb polaczenia</span>
-          <select value={value.role} onChange={(e) => onChange({ ...value, role: e.target.value })}>
+          <select
+            value={value.role}
+            onChange={(e) => onChange({ ...value, role: e.target.value })}
+            disabled={lockRole}
+          >
             <option value="client">Klient</option>
             <option value="server">Serwer</option>
           </select>
@@ -68,7 +79,11 @@ function ConnectionSection({
           <>
             <label className="field">
               <span>Uzytkownik</span>
-              <input value={value.username || ''} onChange={(e) => onChange({ ...value, username: e.target.value })} />
+              <input
+                value={value.username || ''}
+                onChange={(e) => onChange({ ...value, username: e.target.value })}
+                disabled={lockCredentials}
+              />
             </label>
             <label className="field">
               <span>Haslo</span>
@@ -76,6 +91,7 @@ function ConnectionSection({
                 type="password"
                 value={value.password || ''}
                 onChange={(e) => onChange({ ...value, password: e.target.value })}
+                disabled={lockCredentials}
               />
             </label>
             <label className="field">
@@ -83,11 +99,16 @@ function ConnectionSection({
               <input
                 value={value.remotePath || '/'}
                 onChange={(e) => onChange({ ...value, remotePath: e.target.value })}
+                disabled={lockCredentials}
               />
             </label>
           </>
         )}
       </div>
+
+      {(lockRole || lockCredentials) && (
+        <p className="muted-text">Wybrane parametry tego polaczenia sa stale i zablokowane do edycji.</p>
+      )}
 
       {pingResult && (
         <div className={`inline-message ${pingResult.type}`}>
@@ -118,7 +139,12 @@ export default function ConfigurationPageClient() {
           ...(result.network || {}),
           rfidHead: { ...defaultSystemConfig.network.rfidHead, ...(result.network?.rfidHead || {}) },
           cdf: { ...defaultSystemConfig.network.cdf, ...(result.network?.cdf || {}) },
-          ftp: { ...defaultSystemConfig.network.ftp, ...(result.network?.ftp || {}) },
+          ftp: {
+            ...defaultSystemConfig.network.ftp,
+            ...(result.network?.ftp || {}),
+            role: FTP_FIXED_FIELDS.role,
+            remotePath: result.network?.ftp?.remotePath || FTP_FIXED_FIELDS.remotePath,
+          },
         },
         rfid: {
           ...defaultSystemConfig.rfid,
@@ -183,7 +209,13 @@ export default function ConfigurationPageClient() {
       const payload = {
         mode: 'rfid',
         tdc: formData.tdc,
-        network: formData.network,
+        network: {
+          ...formData.network,
+          ftp: {
+            ...formData.network.ftp,
+            role: FTP_FIXED_FIELDS.role,
+          },
+        },
         rfid: {
           expectedTags: formData.rfid.expectedTags,
           head: {
@@ -321,8 +353,14 @@ export default function ConfigurationPageClient() {
         onPing={() => pingConnection('ftp', formData.network.ftp.host, formData.network.ftp.port)}
         onReconnect={() => reconnectConnection('ftp')}
         pingResult={pingResults.ftp}
-        onChange={(value) => setFormData((prev) => ({ ...prev, network: { ...prev.network, ftp: value } }))}
+        onChange={(value) =>
+          setFormData((prev) => ({
+            ...prev,
+            network: { ...prev.network, ftp: { ...value, role: FTP_FIXED_FIELDS.role } },
+          }))
+        }
         withCredentials
+        lockRole
       />
     </div>
   );

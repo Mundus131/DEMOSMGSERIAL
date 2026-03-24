@@ -5,6 +5,6 @@
     "dataBits": 8,
     "stopBits": 1,
     "parity": "none",
-    "mode": "RS485"
+    "mode": "RS232"
   }
 }

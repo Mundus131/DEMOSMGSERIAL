@@ -19,9 +19,9 @@
       "host": "127.0.0.1",
       "port": 21,
       "role": "client",
-      "username": "sick",
-      "password": "sick",
-      "remotePath": "/sick"
+      "username": "SICK",
+      "password": "SICK",
+      "remotePath": "/SICK"
     }
   },
   "rfid": {

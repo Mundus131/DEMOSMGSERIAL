@@ -5,9 +5,7 @@ services:
     image: fauria/vsftpd:latest
     container_name: samsung-rfid-ftp
     restart: unless-stopped
-    ports:
-      - "${FTP_PORT:-21}:21"
-      - "${FTP_PASV_MIN_PORT:-21100}-${FTP_PASV_MAX_PORT:-21110}:${FTP_PASV_MIN_PORT:-21100}-${FTP_PASV_MAX_PORT:-21110}"
+    network_mode: host
     environment:
       FTP_USER: ${FTP_USER:-SICK}
       FTP_PASS: ${FTP_PASS:-SICK}
@@ -23,8 +21,6 @@ services:
     volumes:
       - ftp_data:/home/vsftpd
       - ftp_logs:/var/log/vsftpd
-    networks:
-      - samsung-rfid
 
   backend:
     image: ghcr.io/${GHCR_OWNER}/${GHCR_REPOSITORY}-backend:${BACKEND_TAG:-latest}

@@ -580,7 +580,7 @@ async function checkStatus(metadata = new grpc.Metadata()) {
 
 async function listAvailablePorts() {
   const ports = await SerialPort.list();
-  return ports.map((port) => ({
+  const mappedPorts = ports.map((port) => ({
     path: port.path,
     manufacturer: port.manufacturer || '',
     serialNumber: port.serialNumber || '',
@@ -589,6 +589,49 @@ async function listAvailablePorts() {
     productId: port.productId || '',
     friendlyName: [port.path, port.manufacturer].filter(Boolean).join(' - '),
   }));
+
+  if (process.platform !== 'linux') {
+    return mappedPorts;
+  }
+
+  const activeLinuxTtys = getActiveLinuxSerialPorts();
+  if (!activeLinuxTtys.size) {
+    return mappedPorts;
+  }
+
+  return mappedPorts.filter((port) => {
+    if (!port.path.startsWith('/dev/ttyS')) {
+      return true;
+    }
+
+    return activeLinuxTtys.has(path.basename(port.path));
+  });
+}
+
+function getActiveLinuxSerialPorts() {
+  try {
+    const serialInfo = fs.readFileSync('/proc/tty/driver/serial', 'utf8');
+    const activePorts = new Set();
+
+    for (const line of serialInfo.split('\n')) {
+      const match = line.match(/^(\d+):\s+uart:([^\s]+)/);
+      if (!match) {
+        continue;
+      }
+
+      const [, index, uartType] = match;
+      if (!uartType || uartType.toLowerCase() === 'unknown') {
+        continue;
+      }
+
+      activePorts.add(`ttyS${index}`);
+    }
+
+    return activePorts;
+  } catch (error) {
+    console.warn('⚠️ [SERIAL] Nie udało się odczytać aktywnych portów z /proc/tty/driver/serial:', error.message);
+    return new Set();
+  }
 }
 
 async function getRuntimeInfo() {

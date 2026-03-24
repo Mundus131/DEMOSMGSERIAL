@@ -395,7 +395,17 @@ function setupRoutes() {
         return res.status(400).json({ success: false, error: 'Brak hosta do sprawdzenia' });
       }
 
-      const icmp = await ping.promise.probe(host, { timeout: 2 });
+      let icmp;
+      try {
+        icmp = await ping.promise.probe(host, { timeout: 2 });
+      } catch (icmpError) {
+        icmp = {
+          alive: false,
+          time: 'n/a',
+          output: icmpError.message,
+          error: icmpError.message,
+        };
+      }
       const tcp = await new Promise((resolve) => {
         if (!port) {
           resolve({ ok: null, message: 'Brak portu TCP' });
@@ -421,6 +431,7 @@ function setupRoutes() {
           ok: icmp.alive,
           timeMs: icmp.time,
           output: icmp.output,
+          error: icmp.error || null,
         },
         tcp,
       });

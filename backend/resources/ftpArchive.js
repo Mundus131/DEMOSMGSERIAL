@@ -62,22 +62,30 @@ function getLocalMirrorCandidates(ftpConfig = {}) {
   return [...new Set(candidates.filter(Boolean))];
 }
 
-function buildHourlyDirectories(startedAt, stoppedAt) {
-  const result = [];
-  const cursor = new Date(startedAt);
-  cursor.setMinutes(0, 0, 0);
-
-  while (cursor.getTime() <= stoppedAt) {
-    result.push(path.join(
-      String(cursor.getFullYear()),
-      String(cursor.getMonth() + 1).padStart(2, '0'),
-      String(cursor.getDate()).padStart(2, '0'),
-      String(cursor.getHours()).padStart(2, '0'),
-    ));
-    cursor.setHours(cursor.getHours() + 1, 0, 0, 0);
+async function listLocalImagesRecursive(baseDir, maxDepth = 6, currentDepth = 0) {
+  if (currentDepth > maxDepth || !(await fs.pathExists(baseDir))) {
+    return [];
   }
 
-  return result;
+  const entries = await fs.readdir(baseDir, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(baseDir, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...(await listLocalImagesRecursive(fullPath, maxDepth, currentDepth + 1)));
+      continue;
+    }
+
+    if (!entry.isFile() || !isImageFile(entry.name)) {
+      continue;
+    }
+
+    files.push(fullPath);
+  }
+
+  return files;
 }
 
 async function saveMatchedFiles(summary, files) {
@@ -131,7 +139,6 @@ async function listRecursive(client, remoteDir, depth = 0) {
 
 async function captureImagesFromLocalMirror(summary, ftpConfig, startedAt, stoppedAt) {
   const candidates = getLocalMirrorCandidates(ftpConfig);
-  const hourDirs = buildHourlyDirectories(startedAt, stoppedAt);
 
   for (const baseDir of candidates) {
     if (!(await fs.pathExists(baseDir))) {
@@ -139,31 +146,19 @@ async function captureImagesFromLocalMirror(summary, ftpConfig, startedAt, stopp
     }
 
     const matchedFiles = [];
-    for (const hourDir of hourDirs) {
-      const directoryPath = path.join(baseDir, hourDir);
-      if (!(await fs.pathExists(directoryPath))) {
+    const imageFiles = await listLocalImagesRecursive(baseDir);
+    for (const fullPath of imageFiles) {
+      const stats = await fs.stat(fullPath);
+      const modifiedAt = stats.mtime instanceof Date ? stats.mtime.getTime() : null;
+      if (!modifiedAt || modifiedAt < startedAt || modifiedAt > stoppedAt) {
         continue;
       }
 
-      const entries = await fs.readdir(directoryPath, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isFile() || !isImageFile(entry.name)) {
-          continue;
-        }
-
-        const fullPath = path.join(directoryPath, entry.name);
-        const stats = await fs.stat(fullPath);
-        const modifiedAt = stats.mtime instanceof Date ? stats.mtime.getTime() : null;
-        if (!modifiedAt || modifiedAt < startedAt || modifiedAt > stoppedAt) {
-          continue;
-        }
-
-        matchedFiles.push({
-          name: entry.name,
-          copyFrom: fullPath,
-          modifiedAt: stats.mtime,
-        });
-      }
+      matchedFiles.push({
+        name: path.basename(fullPath),
+        copyFrom: fullPath,
+        modifiedAt: stats.mtime,
+      });
     }
 
     matchedFiles.sort((left, right) => new Date(left.modifiedAt).getTime() - new Date(right.modifiedAt).getTime());
