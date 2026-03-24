@@ -45,6 +45,7 @@ export default function DashboardPageClient() {
   const [message, setMessage] = useState(null);
   const [summary, setSummary] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
+  const [summaryImagePage, setSummaryImagePage] = useState(0);
   const [loading, setLoading] = useState(false);
   const promptDialogRef = useRef(null);
   const summaryDialogRef = useRef(null);
@@ -186,6 +187,7 @@ export default function DashboardPageClient() {
       }
 
       setSummary(result.summary);
+      setSummaryImagePage(0);
       setSessionStatus(result);
       summaryDialogRef.current?.show();
       await loadDashboardData();
@@ -249,6 +251,50 @@ export default function DashboardPageClient() {
     const rightTime = new Date(right?.modifiedAt || 0).getTime();
     return rightTime - leftTime;
   });
+  const summaryImagePageSize = 4;
+  const summaryImagePageCount = Math.max(1, Math.ceil(summaryImages.length / summaryImagePageSize));
+  const currentSummaryImages = summaryImages.slice(
+    summaryImagePage * summaryImagePageSize,
+    summaryImagePage * summaryImagePageSize + summaryImagePageSize
+  );
+  const summaryTagSourceMap = new Map();
+  (summary?.cycles || []).forEach((cycle) => {
+    (cycle?.uniqueCodes || []).forEach((code) => {
+      const normalized = String(code || '').trim();
+      if (!normalized) {
+        return;
+      }
+      const currentSource = summaryTagSourceMap.get(normalized);
+      if (!currentSource) {
+        summaryTagSourceMap.set(normalized, 'RFID');
+      } else if (!String(currentSource).includes('RFID')) {
+        summaryTagSourceMap.set(normalized, `${currentSource} + RFID`);
+      }
+    });
+  });
+  (summary?.externalReads || []).forEach((entry) => {
+    const normalized = String(entry?.code || '').trim();
+    if (!normalized) {
+      return;
+    }
+    const sourceLabel = String(entry?.source || 'CDF').toUpperCase();
+    const currentSource = summaryTagSourceMap.get(normalized);
+    if (!currentSource) {
+      summaryTagSourceMap.set(normalized, sourceLabel);
+    } else if (!String(currentSource).includes(sourceLabel)) {
+      summaryTagSourceMap.set(normalized, `${currentSource} + ${sourceLabel}`);
+    }
+  });
+  const summaryTagRows = (summary?.uniqueTags || [])
+    .filter((tag) => {
+      const normalized = String(tag || '').trim().toLowerCase();
+      return normalized && normalized !== 'noread' && normalized !== 'norread';
+    })
+    .map((tag, index) => ({
+      index: index + 1,
+      code: tag,
+      source: summaryTagSourceMap.get(tag) || 'RFID',
+    }));
 
   const openImagePreview = (image) => {
     setPreviewImage(image || null);
@@ -379,40 +425,88 @@ export default function DashboardPageClient() {
       </syn-dialog>
 
       <syn-dialog ref={summaryDialogRef} label="Podsumowanie zaladunku">
-        <div className="dialog-summary">
-          <p><strong>Numer partii:</strong> {summary?.batchNumber || '-'}</p>
-          <p><strong>Liczba cykli RFID:</strong> {summary?.cycleCount || 0}</p>
-          <p><strong>Suma odczytanych tagow:</strong> {summary?.totalReads || 0}</p>
-          <p><strong>Liczba unikalnych tagow:</strong> {summary?.uniqueTagCount || 0}</p>
-          <p><strong>Liczba zdjęć FTP:</strong> {summary?.imageCount || 0}</p>
-          {summary?.ftpCapture?.message && <p><strong>FTP:</strong> {summary.ftpCapture.message}</p>}
-        </div>
-        <div className="tag-row">
-          {(summary?.uniqueTags || []).filter((tag) => {
-            const normalized = String(tag || '').trim().toLowerCase();
-            return normalized && normalized !== 'noread' && normalized !== 'norread';
-          }).map((tag, index) => (
-            <syn-badge key={`${tag}-${index}`} variant="primary">
-              {tag}
-            </syn-badge>
-          ))}
-        </div>
-        <div className="summary-gallery">
-          {summaryImages.length === 0 && (
-            <span className="muted-text">Brak zdjęć FTP zapisanych dla tej sesji.</span>
-          )}
-          {summaryImages.map((image, index) => (
-            <button
-              key={`${image.url}-${index}`}
-              type="button"
-              className="summary-gallery__item"
-              onClick={() => openImagePreview(image)}
-            >
-              <img src={`${API_BASE_URL}${image.url}`} alt={image.name || `Zdjecie ${index + 1}`} />
-              <span className="summary-gallery__name">{image.name || `Zdjecie ${index + 1}`}</span>
-              <span className="summary-gallery__time">{formatPhotoDateTime(image.modifiedAt)}</span>
-            </button>
-          ))}
+        <div className="summary-layout">
+          <div className="summary-layout__left">
+            <div className="dialog-summary summary-card">
+              <p><strong>Numer partii:</strong> {summary?.batchNumber || '-'}</p>
+              <p><strong>Liczba cykli RFID:</strong> {summary?.cycleCount || 0}</p>
+              <p><strong>Suma odczytanych tagow:</strong> {summary?.totalReads || 0}</p>
+              <p><strong>Liczba unikalnych tagow:</strong> {summary?.uniqueTagCount || 0}</p>
+              <p><strong>Liczba zdjec FTP:</strong> {summary?.imageCount || 0}</p>
+              {summary?.ftpCapture?.message && <p><strong>FTP:</strong> {summary.ftpCapture.message}</p>}
+            </div>
+
+            <div className="summary-gallery-wrap">
+              <div className="summary-gallery">
+                {currentSummaryImages.length === 0 && (
+                  <span className="muted-text">Brak zdjec FTP zapisanych dla tej sesji.</span>
+                )}
+                {currentSummaryImages.map((image, index) => (
+                  <button
+                    key={`${image.url}-${index}`}
+                    type="button"
+                    className="summary-gallery__item"
+                    onClick={() => openImagePreview(image)}
+                  >
+                    <img src={`${API_BASE_URL}${image.url}`} alt={image.name || `Zdjecie ${index + 1}`} />
+                    <span className="summary-gallery__name">{image.name || `Zdjecie ${index + 1}`}</span>
+                    <span className="summary-gallery__time">{formatPhotoDateTime(image.modifiedAt)}</span>
+                  </button>
+                ))}
+              </div>
+              {summaryImagePageCount > 1 && (
+                <div className="summary-gallery__pagination">
+                  <SynButton
+                    variant="outline"
+                    size="small"
+                    disabled={summaryImagePage === 0}
+                    onPress={() => setSummaryImagePage((current) => Math.max(0, current - 1))}
+                  >
+                    Poprzednie
+                  </SynButton>
+                  <span>
+                    Strona {summaryImagePage + 1} / {summaryImagePageCount}
+                  </span>
+                  <SynButton
+                    variant="outline"
+                    size="small"
+                    disabled={summaryImagePage >= summaryImagePageCount - 1}
+                    onPress={() => setSummaryImagePage((current) => Math.min(summaryImagePageCount - 1, current + 1))}
+                  >
+                    Nastepne
+                  </SynButton>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="summary-layout__right">
+            <div className="summary-table-wrap">
+              <table className="syn-table--default summary-tags-table">
+                <thead>
+                  <tr>
+                    <th>LP</th>
+                    <th>Tag</th>
+                    <th>Zrodlo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summaryTagRows.length === 0 && (
+                    <tr>
+                      <td colSpan="3" className="summary-tags-table__empty">Brak zapisanych tagow dla tej sesji.</td>
+                    </tr>
+                  )}
+                  {summaryTagRows.map((row) => (
+                    <tr key={`${row.code}-${row.index}`}>
+                      <td>{row.index}</td>
+                      <td>{row.code}</td>
+                      <td>{row.source}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
         <span slot="footer"></span>
         <SynButton slot="footer" variant="filled" onPress={() => summaryDialogRef.current?.hide()}>

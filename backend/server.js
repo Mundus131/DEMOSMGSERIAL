@@ -525,6 +525,9 @@ async function startServices() {
       publishEvent('loadSession.status', loadSession.getStatus());
     });
     loadSession.on('externalReadRegistered', (payload) => {
+      if (payload?.cycleUpdated) {
+        publishEvent('rfid.cycle', payload.cycleUpdated);
+      }
       publishEvent('loadSession.externalReadRegistered', payload);
       publishEvent('loadSession.status', loadSession.getStatus());
     });

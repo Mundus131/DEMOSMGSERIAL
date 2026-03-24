@@ -159,23 +159,61 @@ class LoadSessionManager extends EventEmitter {
     }
 
     const uniqueSet = new Set(this.currentSession.uniqueTags || []);
-    uniqueSet.add(normalized);
+    const latestCycle = this.currentSession.cycles?.[0] || null;
+    let cycleUpdated = null;
+    let mergedIntoLatestCycle = false;
+    let duplicateInLatestCycle = false;
 
-    const recentSet = new Set(
-      [normalized, ...(Array.isArray(this.currentSession.recentReads) ? this.currentSession.recentReads : [])]
-        .map((value) => String(value || '').trim())
-        .filter(Boolean)
-    );
+    if (latestCycle) {
+      const latestCycleCodes = Array.isArray(latestCycle.uniqueCodes) ? latestCycle.uniqueCodes : [];
+      const latestCycleSet = new Set(
+        latestCycleCodes
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+      );
+
+      if (latestCycleSet.has(normalized)) {
+        duplicateInLatestCycle = true;
+      } else {
+        latestCycleSet.add(normalized);
+        latestCycle.uniqueCodes = Array.from(latestCycleSet);
+        latestCycle.uniqueCount = latestCycle.uniqueCodes.length;
+        if (Number(latestCycle.expectedCount) > 0) {
+          latestCycle.goodRead = latestCycle.uniqueCount >= Number(latestCycle.expectedCount);
+        }
+        latestCycle.results = {
+          ...(latestCycle.results || {}),
+          cdfSupplement: [...new Set([...(latestCycle.results?.cdfSupplement || []), normalized])],
+        };
+        cycleUpdated = { ...latestCycle };
+        mergedIntoLatestCycle = true;
+      }
+    }
+
+    if (!duplicateInLatestCycle) {
+      uniqueSet.add(normalized);
+      this.currentSession.totalReads += 1;
+    }
 
     const externalRead = {
       timestamp: new Date().toISOString(),
       source,
       code: normalized,
+      mergedIntoLatestCycle,
+      duplicateInLatestCycle,
     };
 
-    this.currentSession.totalReads += 1;
     this.currentSession.uniqueTags = Array.from(uniqueSet);
-    this.currentSession.recentReads = Array.from(recentSet).slice(0, 20);
+    if (mergedIntoLatestCycle && latestCycle) {
+      this.currentSession.recentReads = [...latestCycle.uniqueCodes];
+    } else if (!duplicateInLatestCycle) {
+      const recentSet = new Set(
+        [normalized, ...(Array.isArray(this.currentSession.recentReads) ? this.currentSession.recentReads : [])]
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+      );
+      this.currentSession.recentReads = Array.from(recentSet).slice(0, 20);
+    }
     this.currentSession.externalReads = [externalRead, ...(this.currentSession.externalReads || [])].slice(0, 50);
     this.currentSession.updatedAt = externalRead.timestamp;
 
@@ -183,6 +221,7 @@ class LoadSessionManager extends EventEmitter {
     this.emit('externalReadRegistered', {
       session: this.currentSession,
       read: externalRead,
+      cycleUpdated,
     });
     return this.currentSession;
   }

@@ -681,13 +681,49 @@ syn-dialog::part(panel) {
   width: min(1100px, calc(100vw - 48px));
 }
 
+.summary-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.85fr) minmax(0, 1.15fr);
+  gap: 20px;
+  min-height: min(68vh, 760px);
+}
+
+.summary-layout__left,
+.summary-layout__right {
+  min-width: 0;
+}
+
+.summary-card {
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid #dce4ea;
+  background: #f8fbfd;
+}
+
+.summary-gallery-wrap {
+  margin-top: 16px;
+}
+
 .summary-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  margin-top: 18px;
   max-height: 46vh;
   overflow: auto;
+}
+
+.summary-gallery__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.summary-gallery__pagination span {
+  color: var(--shell-muted);
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
 .summary-gallery__item {
@@ -728,6 +764,43 @@ syn-dialog::part(panel) {
 
 .summary-gallery__time {
   font-size: 0.86rem;
+  color: var(--shell-muted);
+}
+
+.summary-table-wrap {
+  height: 100%;
+  max-height: min(68vh, 760px);
+  overflow: auto;
+  border: 1px solid #dce4ea;
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.summary-tags-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.summary-tags-table th,
+.summary-tags-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #e5ebf0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.summary-tags-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f7fafc;
+  font-size: 0.84rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--shell-muted);
+}
+
+.summary-tags-table__empty {
   color: var(--shell-muted);
 }
 
@@ -925,7 +998,8 @@ body.industrial .status-kpi {
   .status-grid,
   .status-grid.compact,
   .operator-dashboard .status-grid,
-  .operator-dashboard .status-grid.compact {
+  .operator-dashboard .status-grid.compact,
+  .summary-layout {
     grid-template-columns: 1fr;
   }
 
@@ -971,5 +1045,14 @@ body.industrial .status-kpi {
   .operator-dashboard .status-card,
   .operator-dashboard .cycle-card {
     padding: 14px;
+  }
+
+  .summary-gallery {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-gallery__pagination {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
