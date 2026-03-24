@@ -18,8 +18,10 @@ Repo jest przygotowane pod:
 - [backend](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/backend)
 - [Frontend/dashboard](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/Frontend/dashboard)
 - [deploy/stack.portainer.yml](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/deploy/stack.portainer.yml)
+- [deploy/sid-postinstall.sh](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/deploy/sid-postinstall.sh)
 - [deploy/.env.stack.example](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/deploy/.env.stack.example)
 - [docs/docker-ghcr.md](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/docs/docker-ghcr.md)
+- [docs/sid-ubuntu-postinstall.md](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/docs/sid-ubuntu-postinstall.md)
 - [.github/workflows/docker-ghcr.yml](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/.github/workflows/docker-ghcr.yml)
 
 ## Wymagania
@@ -108,6 +110,36 @@ Uwagi:
 - domyslny login i haslo w stacku to `SICK` / `SICK`
 - dla poprawnego transferu FTP publikowany jest tez zakres portów pasywnych `21100-21110`
 - backend czyta lokalne lustro FTP bezposrednio ze wspolnego volume `ftp_data`
+
+## SID / Ubuntu IPC
+
+Jesli wdrazasz system na panel `SID160 Pro` z Ubuntu:
+
+1. Zainstaluj czyste Ubuntu 24.04.
+2. Sklonuj repo.
+3. Uruchom:
+
+```bash
+sudo bash deploy/sid-postinstall.sh
+```
+
+4. Zrestartuj panel:
+
+```bash
+sudo reboot
+```
+
+Skrypt ustawia:
+
+- Docker
+- Portainer
+- SSH
+- autologin `sick`
+- kiosk Chromium z `localhost:3000/dashboard`
+- wylaczenie wygaszacza
+- stabilniejsze ustawienia grafiki dla wbudowanego ekranu
+
+Szczegoly sa opisane w [docs/sid-ubuntu-postinstall.md](/C:/SICK/EHUB/RAW_APPS/SAMSUNG_DEMO/docs/sid-ubuntu-postinstall.md).
 
 ## GitHub Actions i GHCR
 
